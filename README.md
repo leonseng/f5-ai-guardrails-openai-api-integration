@@ -7,6 +7,8 @@ Notes:
 - supports both streaming and non-streaming responses
 - supports scanning/redaction of both prompts and responses, configured via `F5_AI_GUARDRAILS_SCAN_*` and `F5_AI_GUARDRAILS_REDACT_*` variables in `.env` file
 
+![Architecture](./docs/images/architecture.excalidraw.png)
+
 
 ## Quickstart
 
@@ -20,6 +22,15 @@ docker compose build
 # Run the setup
 docker compose up
 ```
+
+Browse to [http://localhost:8080](http://localhost:8080) to access Open WebUI.
+
+Send a prompt and observe scan logs, e.g.
+```
+
+```
+
+Confirm scan results on F5 AI Guardrails console.
 
 ## Development
 
