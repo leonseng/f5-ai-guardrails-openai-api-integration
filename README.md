@@ -1,6 +1,6 @@
 # F5 AI Guardrails integration with OpenAI API proxy
 
-This demonstrates how an OpenAI API proxy/LLM orchestration/backend app can be integrated with F5 AI Guardrails to secure an LLM-based application.
+This demonstrates how an OpenAI API proxy/LLM orchestration application can be integrated and secured with F5 AI Guardrails via sideband API calls.
 
 ![Architecture](./assets/architecture.excalidraw.png)
 
