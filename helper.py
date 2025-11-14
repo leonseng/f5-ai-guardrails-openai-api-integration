@@ -39,7 +39,7 @@ class GuardrailClient():
         }
 
         async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.post(self.api_url, headers=self.headers, json=payload)
+            resp = await client.post(f"{self.api_url.rstrip('/')}/scans", headers=self.headers, json=payload)
 
         output = input_text
         try:
