@@ -164,8 +164,9 @@ async def stream_processed_response(
         "choices": [
             {
                 "index": 0,
-                "delta": {},
-                "finish_reason": "stop"
+                "delta": {"content": ""},
+                "finish_reason": "stop",
+                "stop_reason": None
             }
         ]
     }
