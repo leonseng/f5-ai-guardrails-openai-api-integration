@@ -107,9 +107,6 @@ async def chat_completion(request: Request):
 
                 if scan_results.outcome == "redacted" and F5_AI_GUARDRAILS_REDACT_RESPONSE:
                     resp_msg = scan_results.output
-                    # replace content-length in headers (regardless of header is in upper or lower case)
-                    resp_headers = {k: v for k, v in resp_headers.items() if k.lower() != "content-length"}
-                    resp_headers["content-length"] = str(len(resp_msg))
 
             # fail open
             except httpx.ConnectError as e:
