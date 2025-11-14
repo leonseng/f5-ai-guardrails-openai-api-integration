@@ -11,7 +11,7 @@ Notes:
 
 ## Demo
 
-![Demo](./assets/demo.gif)
+![Demo](https://github.com/leonseng/f5-ai-guardrails-openai-api-integration/blob/main/assets/demo.mp4)
 
 ## Quickstart
 
