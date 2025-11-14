@@ -2,13 +2,16 @@
 
 This demonstrates how an OpenAI API proxy/LLM orchestration/backend app can be integrated with F5 AI Guardrails to secure an LLM-based application.
 
+![Architecture](./assets/architecture.excalidraw.png)
+
 Notes:
 - the app is written in FastAPI, exposing OpenAI API's `/models` and `/chat/completion` endpoints to support connections from frontends such as Open WebUI
 - supports both streaming and non-streaming responses
 - supports scanning/redaction of both prompts and responses, configured via `F5_AI_GUARDRAILS_SCAN_*` and `F5_AI_GUARDRAILS_REDACT_*` variables in `.env` file
 
-![Architecture](./docs/images/architecture.excalidraw.png)
+## Demo
 
+![Demo](./assets/demo.gif)
 
 ## Quickstart
 
