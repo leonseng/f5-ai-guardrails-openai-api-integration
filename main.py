@@ -2,13 +2,14 @@ import json
 import logging
 import os
 import time
+from typing import AsyncGenerator, Dict, Any
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import StreamingResponse
 import httpx
 from dotenv import load_dotenv
 
-import helper
+from guardrails import GuardrailsClient
 
 load_dotenv()
 BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:11434")
@@ -25,7 +26,7 @@ app = FastAPI(title="OpenAI Proxy")
 logger = logging.getLogger('uvicorn.error')
 
 if F5_AI_GUARDRAILS_SCAN_PROMPT or F5_AI_GUARDRAILS_SCAN_RESPONSE:
-    GuardrailClient = helper.GuardrailClient(
+    guardrails_client = GuardrailsClient(
         api_url=F5_AI_GUARDRAILS_API_URL,
         api_token=F5_AI_GUARDRAILS_API_TOKEN,
         project_id=F5_AI_GUARDRAILS_PROJECT_ID
@@ -34,174 +35,314 @@ if F5_AI_GUARDRAILS_SCAN_PROMPT or F5_AI_GUARDRAILS_SCAN_RESPONSE:
 logger.info(f"Proxy to backend: {BACKEND_URL}")
 
 
-@app.api_route("/v1/chat/completions", methods=["POST"])
-async def chat_completion(request: Request):
-    """Proxy prompts to backend"""
+async def stream_processed_response_to_client(
+    response_text: str,
+    model: str,
+    request_id: str,
+    chunk_size: int = 5
+) -> AsyncGenerator[str, None]:
+    """
+    Stream the processed response back to the client in OpenAI format.
+    """
+    # Send initial chunk with role
+    chunk = {
+        "id": request_id,
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "delta": {"role": "assistant", "content": ""},
+                "finish_reason": None
+            }
+        ]
+    }
+    yield f"data: {json.dumps(chunk)}\n\n"
 
-    req_body_text = await request.body()
+    # Stream the content in chunks
+    for i in range(0, len(response_text), chunk_size):
+        text_chunk = response_text[i:i + chunk_size]
+
+        chunk = {
+            "id": request_id,
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"content": text_chunk},
+                    "finish_reason": None
+                }
+            ]
+        }
+        yield f"data: {json.dumps(chunk)}\n\n"
+
+    # Send final chunk with finish_reason
+    final_chunk = {
+        "id": request_id,
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "delta": {"content": ""},
+                "finish_reason": "stop",
+                "stop_reason": None
+            }
+        ]
+    }
+    yield f"data: {json.dumps(final_chunk)}\n\n"
+    yield "data: [DONE]\n\n"
+
+
+async def stream_error_response_to_client(msg: str) -> AsyncGenerator[str, None]:
+    error_data = {
+        "error": {
+            "message": msg,
+            "type": "content_policy_violation",
+            "code": "content_blocked"
+        }
+    }
+    # Send the error as a data event
+    yield f"data: {json.dumps(error_data)}\n\n"
+
+
+def create_error_response(message: str, streaming: bool):
+    """Create error response in appropriate format"""
+    if streaming:
+        return StreamingResponse(
+            stream_error_response_to_client(message),
+            status_code=400,
+            media_type="text/event-stream"
+        )
+    else:
+        return Response(content=message, status_code=400)
+
+
+async def scan_prompt_with_guardrail(req_body_json: dict, streaming: bool) -> tuple[StreamingResponse | Response | None, dict]:
+    """
+    Scan prompt and return error response if flagged, or modified request if redacted.
+    Returns (error_response, modified_request) tuple.
+    """
+    if not F5_AI_GUARDRAILS_SCAN_PROMPT:
+        return None, req_body_json
+
     try:
-        req_body_json = json.loads(req_body_text)
-    except json.JSONDecodeError:
-        return Response(content="Invalid JSON body: {raw_req_body}", status_code=400)
+        latest_msg = req_body_json["messages"][-1]
+        if latest_msg.get("role") != "user":
+            return create_error_response("Last message must have role 'user'", streaming), {}
 
-    resp_streaming = req_body_json.get("stream", False)
+        scan_results = await guardrails_client.scan(latest_msg["content"])
 
-    if F5_AI_GUARDRAILS_SCAN_PROMPT:
+        if scan_results.outcome == "flagged":
+            return create_error_response("Prompt blocked by Guardrail", streaming), {}
+
+        if scan_results.outcome == "redacted" and F5_AI_GUARDRAILS_REDACT_PROMPT:
+            req_body_json["messages"][-1]["content"] = scan_results.output
+
+    except httpx.ConnectError as e:
+        logger.error(f"Guardrail connection error: {e}")
+    except Exception as e:
+        logger.error(f"Guardrail scan error: {e}")
+
+    return None, req_body_json
+
+
+async def scan_response_with_guardrail(response_text: str, streaming: bool) -> tuple[StreamingResponse | Response | None, str]:
+    """
+    Scan response and return error or modified text.
+    Returns (error_response, modified_text) tuple.
+    """
+    if not F5_AI_GUARDRAILS_SCAN_RESPONSE:
+        return None, response_text
+
+    try:
+        scan_results = await guardrails_client.scan(response_text)
+
+        if scan_results.outcome == "flagged":
+            return create_error_response("Response blocked by Guardrail", streaming), ""
+
+        if scan_results.outcome == "redacted" and F5_AI_GUARDRAILS_REDACT_RESPONSE:
+            return None, scan_results.output
+
+    except httpx.ConnectError as e:
+        logger.error(f"Guardrail connection error: {e}")
+    except Exception as e:
+        logger.error(f"Guardrail scan error: {e}")
+
+    return None, response_text
+
+
+async def handle_streaming_request(req_body_json: dict, headers: dict, query_params: dict):
+    """Handle streaming chat completion request"""
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        async with client.stream(
+            "POST",
+            f"{BACKEND_URL.rstrip('/')}/v1/chat/completions",
+            headers=headers,
+            params=query_params,
+            content=json.dumps(req_body_json),
+        ) as resp:
+            resp_status_code = resp.status_code
+            logger.debug(f"Response status: {resp_status_code}")
+
+            if resp_status_code != 200:
+                await resp.aread()
+                logger.debug(f"Response body: {resp.content}")
+                return StreamingResponse(
+                    stream_error_response_to_client("Bad response from backend"),
+                    status_code=400,
+                    media_type="text/event-stream"
+                )
+
+            async def buffer_streaming_response_from_backend(response: httpx.Response) -> tuple[str, Dict[str, Any]]:
+                """
+                Buffer the complete streaming response from the backend.
+                Returns the complete text and metadata.
+                """
+                complete_text = ""
+                metadata = {
+                    "id": None,
+                    "model": None,
+                    "created": None,
+                    "finish_reason": None
+                }
+
+                async for line in response.aiter_lines():
+                    if not line.strip() or line.strip() == "data: [DONE]":
+                        continue
+
+                    if line.startswith("data: "):
+                        try:
+                            data = json.loads(line[6:])  # Remove "data: " prefix
+
+                            # Extract metadata from first chunk
+                            if metadata["id"] is None:
+                                metadata["id"] = data.get("id")
+                                metadata["model"] = data.get("model")
+                                metadata["created"] = data.get("created")
+
+                            # Accumulate content
+                            if "choices" in data and len(data["choices"]) > 0:
+                                delta = data["choices"][0].get("delta", {})
+                                if "content" in delta:
+                                    complete_text += delta["content"]
+
+                                # Capture finish reason
+                                finish_reason = data["choices"][0].get("finish_reason")
+                                if finish_reason:
+                                    metadata["finish_reason"] = finish_reason
+
+                        except json.JSONDecodeError:
+                            continue
+
+                return complete_text, metadata
+
+            resp_msg, metadata = await buffer_streaming_response_from_backend(resp)
+            logger.debug(f"Response message: {resp_msg}")
+
+    # Scan response if enabled
+    error_response, modified_msg = await scan_response_with_guardrail(resp_msg, streaming=True)
+    if error_response:
+        return error_response
+
+    return StreamingResponse(
+        stream_processed_response_to_client(
+            modified_msg,
+            metadata.get("model", req_body_json.get("model", "unknown")),
+            metadata.get("id", f"chatcmpl-{int(time.time())}")
+        ),
+        status_code=200,
+        media_type="text/event-stream",
+        headers=resp.headers
+    )
+
+
+async def handle_non_streaming_request(req_body_json: dict, headers: dict, query_params: dict):
+    """Handle non-streaming chat completion request"""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        resp = await client.post(
+            f"{BACKEND_URL.rstrip('/')}/v1/chat/completions",
+            headers=headers,
+            params=query_params,
+            content=json.dumps(req_body_json)
+        )
+
+    resp_status_code = resp.status_code
+    logger.debug(f"Response status: {resp_status_code}")
+    resp_headers = resp.headers
+    resp_body_text = resp.content
+    logger.debug(f"Response body: {resp_body_text}")
+
+    # Scan response if enabled and successful
+    if F5_AI_GUARDRAILS_SCAN_RESPONSE and resp_status_code == 200:
         try:
-            latest_msg = req_body_json["messages"][-1]
-            if latest_msg.get("role") != "user":
-                if resp_streaming:
-                    return StreamingResponse(
-                        helper.stream_error_response("Last message must have role 'user'"),
-                        status_code=400,
-                        media_type="text/event-stream"
-                    )
-                else:
-                    return Response(content="Last message must have role 'user'", status_code=400)
-            scan_results = await GuardrailClient.scan(latest_msg["content"])
+            resp_body_json = json.loads(resp_body_text)
+            resp_msg = resp_body_json["choices"][0]["message"]["content"]
 
-            if scan_results.outcome == "flagged":
-                if resp_streaming:
-                    return StreamingResponse(
-                        helper.stream_error_response("Prompt blocked by Guardrail"),
-                        status_code=400,
-                        media_type="text/event-stream"
-                    )
-                else:
-                    return Response(content="Prompt blocked by Guardrail", status_code=400)
+            error_response, modified_msg = await scan_response_with_guardrail(resp_msg, streaming=False)
+            if error_response:
+                return error_response
 
-            if scan_results.outcome == "redacted" and F5_AI_GUARDRAILS_REDACT_PROMPT:
-                req_body_json["messages"][-1]["content"] = scan_results.output
-        # fail open
+            if modified_msg != resp_msg:
+                resp_body_json["choices"][0]["message"]["content"] = modified_msg
+                resp_body_text = json.dumps(resp_body_json)
+
+                # recalculate content-length
+                resp_headers = {k: v for k, v in resp_headers.items() if k.lower() != "content-length"}
+                resp_headers["content-length"] = str(len(resp_body_text))
+
+        except json.JSONDecodeError:
+            return Response(content=f"Invalid JSON body: {resp_body_text}", status_code=400)
+        except ValueError:
+            logger.warning(f"Not valid OpenAI API response: {resp_body_text}")
         except httpx.ConnectError as e:
             logger.error(f"Guardrail connection error: {e}")
         except Exception as e:
             logger.error(f"Guardrail scan error: {e}")
 
-    # proxy request to BACKEND_URL
-    # rewrite host header to BACKEND_URL host. note that header can be in upper or lower case
+    return Response(
+        content=resp_body_text,
+        status_code=resp_status_code,
+        headers=resp_headers
+    )
+
+
+@app.api_route("/v1/chat/completions", methods=["POST"])
+async def chat_completion(request: Request):
+    """Proxy prompts to backend with optional guardrail scanning"""
+
+    # Parse request body
+    req_body_text = await request.body()
+    try:
+        req_body_json = json.loads(req_body_text)
+    except json.JSONDecodeError:
+        return Response(content="Invalid JSON body", status_code=400)
+
+    resp_streaming = req_body_json.get("stream", False)
+
+    # Scan prompt if enabled
+    error_response, req_body_json = await scan_prompt_with_guardrail(req_body_json, resp_streaming)
+    if error_response:
+        return error_response
+
+    # Prepare headers for backend request
     headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
     headers["host"] = BACKEND_URL.replace("http://", "").replace("https://", "").split("/")[0]
 
-    req_body_text = json.dumps(req_body_json)
-
+    # Route to appropriate handler
     if resp_streaming:
-        # buffer streaming response from backend for scanning, then stream scanned response to client
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            # Make streaming request to backend
-            async with client.stream(
-                "POST",
-                f"{BACKEND_URL.rstrip('/')}/v1/chat/completions",
-                headers=headers,
-                params=dict(request.query_params),
-                content=req_body_text,
-            ) as resp:
-                # Buffer the complete streaming response
-                resp_status_code = resp.status_code
-                logger.debug(f"Response status: {resp_status_code}")
-
-                resp_headers = resp.headers
-                logger.debug(f"Response headers: {resp_headers}")
-
-                if resp_status_code != 200:
-                    await resp.aread()
-                    logger.debug(f"Response body: {resp.content}")
-                    return StreamingResponse(
-                        helper.stream_error_response("Bad response from backend"),
-                        status_code=400,
-                        media_type="text/event-stream"
-                    )
-
-                resp_msg, metadata = await helper.buffer_streaming_response(resp)
-                logger.debug(f"Response message: {resp_msg}")
-
-        if F5_AI_GUARDRAILS_SCAN_RESPONSE:
-            # validate guardrail results
-            try:
-                scan_results = await GuardrailClient.scan(resp_msg)
-
-                if scan_results.outcome == "flagged":
-                    return StreamingResponse(
-                        helper.stream_error_response("Response blocked by Guardrail"),
-                        status_code=400,
-                        media_type="text/event-stream"
-                    )
-
-                if scan_results.outcome == "redacted" and F5_AI_GUARDRAILS_REDACT_RESPONSE:
-                    resp_msg = scan_results.output
-
-            # fail open
-            except httpx.ConnectError as e:
-                logger.error(f"Guardrail connection error: {e}")
-            except Exception as e:
-                # fail open
-                logger.error(f"Guardrail scan error: {e}")
-
-        return StreamingResponse(
-            helper.stream_processed_response(
-                resp_msg,
-                metadata.get("model", req_body_json.get("model", "unknown")),
-                metadata.get("id", f"chatcmpl-{int(time.time())}")
-            ),
-            status_code=resp_status_code,
-            media_type="text/event-stream",
-            headers=resp_headers
-        )
+        return await handle_streaming_request(req_body_json, headers, dict(request.query_params))
     else:
-        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            resp = await client.post(
-                f"{BACKEND_URL.rstrip('/')}/v1/chat/completions",
-                headers=headers,
-                params=dict(request.query_params),
-                content=req_body_text
-            )
-
-        resp_status_code = resp.status_code
-        logger.debug(f"Response status: {resp_status_code}")
-        resp_headers = resp.headers
-        logger.debug(f"Response headers: {resp_headers}")
-        resp_body_text = resp.content
-        logger.debug(f"Response body: {resp_body_text}")
-
-        if F5_AI_GUARDRAILS_SCAN_RESPONSE and resp.status_code == 200:
-            try:
-                resp_body_json = json.loads(resp_body_text)
-                resp_msg = resp_body_json["choices"][0]["message"]["content"]
-                scan_results = await GuardrailClient.scan(resp_msg)
-
-                if scan_results.outcome == "flagged":
-                    return Response(content="Response blocked by Guardrail", status_code=400)
-
-                if scan_results.outcome == "redacted" and F5_AI_GUARDRAILS_REDACT_RESPONSE:
-                    resp_body_json["choices"][0]["message"]["content"] = scan_results.output
-                    resp_body_text = json.dumps(resp_body_json)
-                    # replace content-length in headers (regardless of header is in upper or lower case)
-                    resp_headers = {k: v for k, v in resp_headers.items() if k.lower() != "content-length"}
-                    resp_headers["content-length"] = str(len(resp_body_text))
-
-            except json.JSONDecodeError:
-                return Response(content=f"Invalid JSON body: {resp_body_text}", status_code=400)
-            # fail open
-            except ValueError:
-                logger.warning(f"Not valid OpenAI API response: {resp_body_text}")
-            except httpx.ConnectError as e:
-                logger.error(f"Guardrail connection error: {e}")
-            except Exception as e:
-                logger.error(f"Guardrail scan error: {e}")
-
-        return Response(
-            content=resp_body_text,
-            status_code=resp_status_code,
-            headers=resp_headers
-        )
+        return await handle_non_streaming_request(req_body_json, headers, dict(request.query_params))
 
 
 @app.api_route("/v1/models", methods=["GET"])
 async def models(request: Request):
     """List models"""
-    # proxy request to BACKEND_URL
-
-    # rewrite host header to BACKEND_URL host. note that header can be in upper or lower case
     headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
     headers["host"] = BACKEND_URL.replace("http://", "").replace("https://", "").split("/")[0]
 
@@ -212,12 +353,8 @@ async def models(request: Request):
             params=dict(request.query_params)
         )
 
-    resp_status_code = resp.status_code
-    resp_headers = resp.headers
-    resp_body_text = resp.content
-
     return Response(
-        content=resp_body_text,
-        status_code=resp_status_code,
-        headers=resp_headers
+        content=resp.content,
+        status_code=resp.status_code,
+        headers=resp.headers
     )
