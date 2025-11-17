@@ -172,3 +172,15 @@ async def stream_processed_response(
     }
     yield f"data: {json.dumps(final_chunk)}\n\n"
     yield "data: [DONE]\n\n"
+
+
+async def stream_error_response(msg: str) -> AsyncGenerator[str, None]:
+    error_data = {
+        "error": {
+            "message": msg,
+            "type": "content_policy_violation",
+            "code": "content_blocked"
+        }
+    }
+    # Send the error as a data event
+    yield f"data: {json.dumps(error_data)}\n\n"

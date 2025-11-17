@@ -50,11 +50,25 @@ async def chat_completion(request: Request):
         try:
             latest_msg = req_body_json["messages"][-1]
             if latest_msg.get("role") != "user":
-                return Response(content="Last message must have role 'user'", status_code=400)
+                if resp_streaming:
+                    return StreamingResponse(
+                        helper.stream_error_response("Last message must have role 'user'"),
+                        status_code=400,
+                        media_type="text/event-stream"
+                    )
+                else:
+                    return Response(content="Last message must have role 'user'", status_code=400)
             scan_results = await GuardrailClient.scan(latest_msg["content"])
 
             if scan_results.outcome == "flagged":
-                return Response(content="Prompt blocked by Guardrail", status_code=403)
+                if resp_streaming:
+                    return StreamingResponse(
+                        helper.stream_error_response("Prompt blocked by Guardrail"),
+                        status_code=400,
+                        media_type="text/event-stream"
+                    )
+                else:
+                    return Response(content="Prompt blocked by Guardrail", status_code=400)
 
             if scan_results.outcome == "redacted" and F5_AI_GUARDRAILS_REDACT_PROMPT:
                 req_body_json["messages"][-1]["content"] = scan_results.output
@@ -92,7 +106,11 @@ async def chat_completion(request: Request):
                 if resp_status_code != 200:
                     await resp.aread()
                     logger.debug(f"Response body: {resp.content}")
-                    return Response(content=resp.content, status_code=resp_status_code, headers=resp_headers)
+                    return StreamingResponse(
+                        helper.stream_error_response("Bad response from backend"),
+                        status_code=400,
+                        media_type="text/event-stream"
+                    )
 
                 resp_msg, metadata = await helper.buffer_streaming_response(resp)
                 logger.debug(f"Response message: {resp_msg}")
@@ -103,7 +121,11 @@ async def chat_completion(request: Request):
                 scan_results = await GuardrailClient.scan(resp_msg)
 
                 if scan_results.outcome == "flagged":
-                    return Response(content="Response blocked by Guardrail", status_code=403)
+                    return StreamingResponse(
+                        helper.stream_error_response("Response blocked by Guardrail"),
+                        status_code=400,
+                        media_type="text/event-stream"
+                    )
 
                 if scan_results.outcome == "redacted" and F5_AI_GUARDRAILS_REDACT_RESPONSE:
                     resp_msg = scan_results.output
@@ -148,7 +170,7 @@ async def chat_completion(request: Request):
                 scan_results = await GuardrailClient.scan(resp_msg)
 
                 if scan_results.outcome == "flagged":
-                    return Response(content="Response blocked by Guardrail", status_code=403)
+                    return Response(content="Response blocked by Guardrail", status_code=400)
 
                 if scan_results.outcome == "redacted" and F5_AI_GUARDRAILS_REDACT_RESPONSE:
                     resp_body_json["choices"][0]["message"]["content"] = scan_results.output
