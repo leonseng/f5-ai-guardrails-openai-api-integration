@@ -178,6 +178,10 @@ async def scan_response_with_guardrail(response_text: str, streaming: bool) -> t
 
 async def handle_streaming_request(req_body_json: dict, headers: dict, query_params: dict):
     """Handle streaming chat completion request"""
+
+    logger.debug(f"Request headers: {headers}")
+    logger.debug(f"Request body: {req_body_json}")
+
     async with httpx.AsyncClient(timeout=120.0) as client:
         async with client.stream(
             "POST",
@@ -188,6 +192,7 @@ async def handle_streaming_request(req_body_json: dict, headers: dict, query_par
         ) as resp:
             resp_status_code = resp.status_code
             logger.debug(f"Response status: {resp_status_code}")
+            logger.debug(f"Response headers: {resp.headers}")
 
             if resp_status_code != 200:
                 await resp.aread()
@@ -263,6 +268,10 @@ async def handle_streaming_request(req_body_json: dict, headers: dict, query_par
 
 async def handle_non_streaming_request(req_body_json: dict, headers: dict, query_params: dict):
     """Handle non-streaming chat completion request"""
+
+    logger.debug(f"Request headers: {headers}")
+    logger.debug(f"Request body: {req_body_json}")
+
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         resp = await client.post(
             f"{BACKEND_URL.rstrip('/')}/v1/chat/completions",
@@ -274,6 +283,7 @@ async def handle_non_streaming_request(req_body_json: dict, headers: dict, query
     resp_status_code = resp.status_code
     logger.debug(f"Response status: {resp_status_code}")
     resp_headers = resp.headers
+    logger.debug(f"Response headers: {resp_headers}")
     resp_body_text = resp.content
     logger.debug(f"Response body: {resp_body_text}")
 
@@ -335,8 +345,10 @@ async def chat_completion(request: Request):
 
     # Route to appropriate handler
     if resp_streaming:
+        logger.debug("Handling streaming chat completion request")
         return await handle_streaming_request(req_body_json, headers, dict(request.query_params))
     else:
+        logger.debug("Handling non-streaming chat completion request")
         return await handle_non_streaming_request(req_body_json, headers, dict(request.query_params))
 
 
