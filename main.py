@@ -301,9 +301,10 @@ async def handle_non_streaming_request(req_body_json: dict, headers: dict, query
                 resp_body_json["choices"][0]["message"]["content"] = modified_msg
                 resp_body_text = json.dumps(resp_body_json)
 
-                # recalculate content-length
-                resp_headers = {k: v for k, v in resp_headers.items() if k.lower() != "content-length"}
-                resp_headers["content-length"] = str(len(resp_body_text))
+                # recalculate content-length if present in response
+                if "content-length" in resp_headers:
+                    resp_headers = {k: v for k, v in resp_headers.items() if k.lower() != "content-length"}
+                    resp_headers["content-length"] = str(len(resp_body_text))
 
         except json.JSONDecodeError:
             return Response(content=f"Invalid JSON body: {resp_body_text}", status_code=400)
