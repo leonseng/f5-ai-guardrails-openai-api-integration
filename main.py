@@ -14,6 +14,7 @@ from guardrails import GuardrailsClient
 load_dotenv()
 BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:11434")
 TIMEOUT = float(os.getenv("PROXY_TIMEOUT", "30"))
+SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT")
 F5_AI_GUARDRAILS_API_URL = str(os.getenv("F5_AI_GUARDRAILS_API_URL"))
 F5_AI_GUARDRAILS_API_TOKEN = str(os.getenv("F5_AI_GUARDRAILS_API_TOKEN"))
 F5_AI_GUARDRAILS_PROJECT_ID = str(os.getenv("F5_AI_GUARDRAILS_PROJECT_ID"))
@@ -33,6 +34,7 @@ if F5_AI_GUARDRAILS_SCAN_PROMPT or F5_AI_GUARDRAILS_SCAN_RESPONSE:
     )
 
 logger.info(f"Proxy to backend: {BACKEND_URL}")
+logger.debug(f"SYSTEM_PROMPT: {SYSTEM_PROMPT}")
 
 
 async def stream_processed_response_to_client(
@@ -120,6 +122,19 @@ def create_error_response(message: str, streaming: bool):
         )
     else:
         return Response(content=message, status_code=400)
+
+
+async def inject_system_prompt(req_body_json: dict) -> dict:
+    """
+    Inject system prompt if configured and not already present.
+    """
+    if SYSTEM_PROMPT and "messages" in req_body_json:
+        messages = req_body_json["messages"]
+        has_system = any(msg.get("role") == "system" for msg in messages)
+        if not has_system:
+            req_body_json["messages"] = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
+            logger.debug("Injected system prompt")
+    return req_body_json
 
 
 async def scan_prompt_with_guardrail(req_body_json: dict, streaming: bool) -> tuple[StreamingResponse | Response | None, dict]:
@@ -334,6 +349,9 @@ async def chat_completion(request: Request):
         return Response(content="Invalid JSON body", status_code=400)
 
     resp_streaming = req_body_json.get("stream", False)
+
+    # Inject system prompt if configured
+    req_body_json = await inject_system_prompt(req_body_json)
 
     # Scan prompt if enabled
     error_response, req_body_json = await scan_prompt_with_guardrail(req_body_json, resp_streaming)
