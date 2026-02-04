@@ -38,7 +38,8 @@ Confirm scan results on F5 AI Guardrails console.
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+# Install production + development dependencies
+pip install -e .[dev]
 ```
 
 2. Run the server:

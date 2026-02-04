@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 from guardrails import GuardrailsClient
 
-load_dotenv()
+load_dotenv(override=False)
 BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:11434")
 TIMEOUT = float(os.getenv("PROXY_TIMEOUT", "30"))
 SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT")

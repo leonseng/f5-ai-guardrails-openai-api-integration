@@ -1,5 +1,51 @@
+# Python cache and bytecode
 __pycache__/
-.openwebui/
-.env
-.vscode/
+*.pyc
+*.pyo
+*.pyd
+**/__pycache__
+
+# Virtual environments
 .venv/
+venv/
+env/
+
+# Environment and secrets
+.env
+.env.local
+
+# Version control
+.git/
+.gitignore
+
+# IDE and editor configs
+.vscode/
+.idea/
+pyrightconfig.json
+*.swp
+*.swo
+*~
+
+# Testing
+tests/
+.pytest_cache/
+pytest.ini
+run_tests.sh
+.coverage
+htmlcov/
+
+# Documentation
+README.md
+*.md
+docs/
+
+# Development files
+.env.example
+docker-compose.yml
+Dockerfile
+
+# Application-specific
+.openwebui/
+
+# Assets (if not needed at runtime)
+assets/
