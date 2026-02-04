@@ -45,7 +45,7 @@ pip install -e .[dev]
 2. Run the server:
 
 ```bash
-export BACKEND_URL=http://192.168.0.4:11434
+export OPENAI_API_URL=http://192.168.0.4:11434
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 

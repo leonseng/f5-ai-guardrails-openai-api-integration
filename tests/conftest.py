@@ -16,10 +16,10 @@ from tests.mocks.openai_mock import (
 def test_env_vars() -> Generator[Dict[str, str], None, None]:
     """Set up test environment variables"""
     original_env = os.environ.copy()
-    
+
     # Set default test environment variables
     test_vars = {
-        "BACKEND_URL": "http://mock-backend:11434",
+        "OPENAI_API_URL": "http://mock-backend:11434",
         "PROXY_TIMEOUT": "30",
         "SYSTEM_PROMPT": "",
         "F5_AI_GUARDRAILS_API_URL": "http://mock-guardrails/api",
@@ -32,12 +32,12 @@ def test_env_vars() -> Generator[Dict[str, str], None, None]:
         "F5_AI_GUARDRAILS_REDACT_PROMPT": "",
         "F5_AI_GUARDRAILS_REDACT_RESPONSE": "",
     }
-    
+
     for key, value in test_vars.items():
         os.environ[key] = value
-    
+
     yield test_vars
-    
+
     # Restore original environment
     os.environ.clear()
     os.environ.update(original_env)
@@ -112,7 +112,7 @@ def setup_mock_guardrails_scan(mock_guardrails: respx.MockRouter) -> Callable[[s
             create_flagged_response,
             create_redacted_response
         )
-        
+
         if outcome == "cleared":
             response = create_cleared_response(input_text)
         elif outcome == "flagged":
@@ -121,7 +121,7 @@ def setup_mock_guardrails_scan(mock_guardrails: respx.MockRouter) -> Callable[[s
             response = create_redacted_response(input_text, redacted_text or "[REDACTED]")
         else:
             raise ValueError(f"Unknown outcome: {outcome}")
-        
+
         mock_guardrails.post("/api/scans").mock(
             return_value=Response(
                 status_code=200,
@@ -129,4 +129,3 @@ def setup_mock_guardrails_scan(mock_guardrails: respx.MockRouter) -> Callable[[s
             )
         )
     return _setup
-

@@ -145,7 +145,7 @@ This can happen when environment variables change between tests. Solutions:
 ### Mock not working
 - Ensure `respx` is installed: `pip install respx`
 - Check that mock fixtures are being used in test function signatures
-- Verify the mock URL matches the `BACKEND_URL` in test environment
+- Verify the mock URL matches the `OPENAI_API_URL` in test environment
 
 ## Contributing
 

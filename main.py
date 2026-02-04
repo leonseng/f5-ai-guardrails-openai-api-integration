@@ -12,7 +12,10 @@ from dotenv import load_dotenv
 from guardrails import GuardrailsClient
 
 load_dotenv(override=False)
-BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:11434")
+OPENAI_API_URL = os.getenv("OPENAI_API_URL", "http://127.0.0.1:11434")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+MODEL = os.getenv("MODEL")
+
 TIMEOUT = float(os.getenv("PROXY_TIMEOUT", "30"))
 SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT")
 F5_AI_GUARDRAILS_API_URL = str(os.getenv("F5_AI_GUARDRAILS_API_URL"))
@@ -33,7 +36,7 @@ if F5_AI_GUARDRAILS_SCAN_PROMPT or F5_AI_GUARDRAILS_SCAN_RESPONSE:
         project_id=F5_AI_GUARDRAILS_PROJECT_ID
     )
 
-logger.info(f"Proxy to backend: {BACKEND_URL}")
+logger.info(f"Proxy to backend: {OPENAI_API_URL}")
 logger.debug(f"SYSTEM_PROMPT: {SYSTEM_PROMPT}")
 
 
@@ -191,7 +194,7 @@ async def scan_response_with_guardrail(response_text: str, streaming: bool) -> t
     return None, response_text
 
 
-async def handle_streaming_request(req_body_json: dict, headers: dict, query_params: dict):
+async def handle_streaming_request(req_body_json: dict, headers: dict, query_params: dict, original_model: str | None = None):
     """Handle streaming chat completion request"""
 
     logger.debug(f"Request headers: {headers}")
@@ -200,7 +203,7 @@ async def handle_streaming_request(req_body_json: dict, headers: dict, query_par
     async with httpx.AsyncClient(timeout=120.0) as client:
         async with client.stream(
             "POST",
-            f"{BACKEND_URL.rstrip('/')}/v1/chat/completions",
+            f"{OPENAI_API_URL.rstrip('/')}/v1/chat/completions",
             headers=headers,
             params=query_params,
             content=json.dumps(req_body_json),
@@ -269,10 +272,13 @@ async def handle_streaming_request(req_body_json: dict, headers: dict, query_par
     if error_response:
         return error_response
 
+    # Use original model from client if provided, otherwise use backend's model
+    response_model = original_model or metadata.get("model", req_body_json.get("model", "unknown"))
+
     return StreamingResponse(
         stream_processed_response_to_client(
             modified_msg,
-            metadata.get("model", req_body_json.get("model", "unknown")),
+            response_model,
             metadata.get("id", f"chatcmpl-{int(time.time())}")
         ),
         status_code=200,
@@ -281,7 +287,7 @@ async def handle_streaming_request(req_body_json: dict, headers: dict, query_par
     )
 
 
-async def handle_non_streaming_request(req_body_json: dict, headers: dict, query_params: dict):
+async def handle_non_streaming_request(req_body_json: dict, headers: dict, query_params: dict, original_model: str | None = None):
     """Handle non-streaming chat completion request"""
 
     logger.debug(f"Request headers: {headers}")
@@ -289,7 +295,7 @@ async def handle_non_streaming_request(req_body_json: dict, headers: dict, query
 
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         resp = await client.post(
-            f"{BACKEND_URL.rstrip('/')}/v1/chat/completions",
+            f"{OPENAI_API_URL.rstrip('/')}/v1/chat/completions",
             headers=headers,
             params=query_params,
             content=json.dumps(req_body_json)
@@ -330,6 +336,24 @@ async def handle_non_streaming_request(req_body_json: dict, headers: dict, query
         except Exception as e:
             logger.error(f"Guardrail scan error: {e}")
 
+    # Restore original model in response if it was overridden
+    if original_model and resp_status_code == 200:
+        try:
+            resp_body_json = json.loads(resp_body_text)
+            if "model" in resp_body_json:
+                resp_body_json["model"] = original_model
+                resp_body_text = json.dumps(resp_body_json)
+
+                # recalculate content-length if present in response
+                if "content-length" in resp_headers:
+                    resp_headers = {k: v for k, v in resp_headers.items() if k.lower() != "content-length"}
+                    resp_headers["content-length"] = str(len(resp_body_text))
+
+        except json.JSONDecodeError:
+            logger.warning(f"Could not restore original model - invalid JSON: {resp_body_text}")
+        except Exception as e:
+            logger.error(f"Error restoring original model: {e}")
+
     return Response(
         content=resp_body_text,
         status_code=resp_status_code,
@@ -358,28 +382,46 @@ async def chat_completion(request: Request):
     if error_response:
         return error_response
 
+    # Store original model from client request
+    original_model = req_body_json.get("model")
+
+    # Override model if MODEL env var is set
+    if MODEL:
+        req_body_json["model"] = MODEL
+        logger.debug(f"Overriding model from '{original_model}' to '{MODEL}'")
+
     # Prepare headers for backend request
     headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
-    headers["host"] = BACKEND_URL.replace("http://", "").replace("https://", "").split("/")[0]
+    headers["host"] = OPENAI_API_URL.replace("http://", "").replace("https://", "").split("/")[0]
+
+    # Override Authorization header if OPENAI_API_KEY env var is set
+    if OPENAI_API_KEY:
+        headers["Authorization"] = f"Bearer {OPENAI_API_KEY}"
+        logger.debug("Overriding Authorization header with OPENAI_API_KEY")
 
     # Route to appropriate handler
     if resp_streaming:
         logger.debug("Handling streaming chat completion request")
-        return await handle_streaming_request(req_body_json, headers, dict(request.query_params))
+        return await handle_streaming_request(req_body_json, headers, dict(request.query_params), original_model)
     else:
         logger.debug("Handling non-streaming chat completion request")
-        return await handle_non_streaming_request(req_body_json, headers, dict(request.query_params))
+        return await handle_non_streaming_request(req_body_json, headers, dict(request.query_params), original_model)
 
 
 @app.api_route("/v1/models", methods=["GET"])
 async def models(request: Request):
     """List models"""
     headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
-    headers["host"] = BACKEND_URL.replace("http://", "").replace("https://", "").split("/")[0]
+    headers["host"] = OPENAI_API_URL.replace("http://", "").replace("https://", "").split("/")[0]
+
+    # Override Authorization header if OPENAI_API_KEY env var is set
+    if OPENAI_API_KEY:
+        headers["Authorization"] = f"Bearer {OPENAI_API_KEY}"
+        logger.debug("Overriding Authorization header with OPENAI_API_KEY")
 
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         resp = await client.get(
-            f"{BACKEND_URL.rstrip('/')}/v1/models",
+            f"{OPENAI_API_URL.rstrip('/')}/v1/models",
             headers=headers,
             params=dict(request.query_params)
         )
