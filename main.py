@@ -203,7 +203,7 @@ async def handle_streaming_request(req_body_json: dict, headers: dict, query_par
     async with httpx.AsyncClient(timeout=120.0) as client:
         async with client.stream(
             "POST",
-            f"{OPENAI_API_URL.rstrip('/')}/v1/chat/completions",
+            f"{OPENAI_API_URL.rstrip('/')}/chat/completions",
             headers=headers,
             params=query_params,
             content=json.dumps(req_body_json).encode('utf-8'),
@@ -301,7 +301,7 @@ async def handle_non_streaming_request(req_body_json: dict, headers: dict, query
 
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         resp = await client.post(
-            f"{OPENAI_API_URL.rstrip('/')}/v1/chat/completions",
+            f"{OPENAI_API_URL.rstrip('/')}/chat/completions",
             headers=headers,
             params=query_params,
             content=json.dumps(req_body_json).encode('utf-8')
@@ -427,7 +427,7 @@ async def models(request: Request):
 
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         resp = await client.get(
-            f"{OPENAI_API_URL.rstrip('/')}/v1/models",
+            f"{OPENAI_API_URL.rstrip('/')}/models",
             headers=headers,
             params=dict(request.query_params)
         )

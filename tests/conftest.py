@@ -19,7 +19,7 @@ def test_env_vars() -> Generator[Dict[str, str], None, None]:
 
     # Set default test environment variables
     test_vars = {
-        "OPENAI_API_URL": "http://mock-backend:11434",
+        "OPENAI_API_URL": "http://mock-backend:11434/v1",
         "PROXY_TIMEOUT": "30",
         "SYSTEM_PROMPT": "",
         "F5_AI_GUARDRAILS_API_URL": "http://mock-guardrails/api",
