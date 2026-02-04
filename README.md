@@ -55,3 +55,55 @@ curl -X POST "http://localhost:8000/v1/chat/completions" \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}]}'
 ```
+
+## Testing
+
+The project includes a comprehensive integration test suite using mocked backends for fast, reliable testing.
+
+### Quick Start
+
+**Easiest way - use the test runner script:**
+
+```bash
+./run_tests.sh
+```
+
+**Or activate the virtual environment:**
+
+```bash
+source .venv/bin/activate
+pytest tests/
+```
+
+**Or use the full path:**
+
+```bash
+.venv/bin/python -m pytest tests/
+```
+
+### Run with Coverage
+
+```bash
+# With test script
+./run_tests.sh  # (add coverage flag if needed)
+
+# With venv activated
+source .venv/bin/activate
+pytest tests/ --cov=main --cov-report=html
+
+# Without venv activated
+.venv/bin/python -m pytest tests/ --cov=main --cov-report=html
+```
+
+### Key Features
+
+- **Fast**: All tests use mocked backends (~1 second for full suite)
+- **No external dependencies**: Works without Ollama, OpenAI, or real F5 Guardrails
+- **Comprehensive**: 27 tests covering all functionality
+- **CI/CD Ready**: Perfect for automated testing pipelines
+
+See [tests/README.md](tests/README.md) for detailed testing documentation, including:
+- Test organization and structure
+- Running specific test suites
+- Adding new tests
+- Troubleshooting
