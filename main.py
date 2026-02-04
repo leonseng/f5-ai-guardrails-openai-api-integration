@@ -206,7 +206,7 @@ async def handle_streaming_request(req_body_json: dict, headers: dict, query_par
             f"{OPENAI_API_URL.rstrip('/')}/v1/chat/completions",
             headers=headers,
             params=query_params,
-            content=json.dumps(req_body_json),
+            content=json.dumps(req_body_json).encode('utf-8'),
         ) as resp:
             resp_status_code = resp.status_code
             logger.debug(f"Response status: {resp_status_code}")
@@ -275,6 +275,12 @@ async def handle_streaming_request(req_body_json: dict, headers: dict, query_par
     # Use original model from client if provided, otherwise use backend's model
     response_model = original_model or metadata.get("model", req_body_json.get("model", "unknown"))
 
+    # Filter out headers that should not be forwarded
+    response_headers = {
+        k: v for k, v in resp.headers.items()
+        if k.lower() not in ("content-length", "content-encoding", "transfer-encoding")
+    }
+
     return StreamingResponse(
         stream_processed_response_to_client(
             modified_msg,
@@ -283,7 +289,7 @@ async def handle_streaming_request(req_body_json: dict, headers: dict, query_par
         ),
         status_code=200,
         media_type="text/event-stream",
-        headers=resp.headers
+        headers=response_headers
     )
 
 
@@ -298,7 +304,7 @@ async def handle_non_streaming_request(req_body_json: dict, headers: dict, query
             f"{OPENAI_API_URL.rstrip('/')}/v1/chat/completions",
             headers=headers,
             params=query_params,
-            content=json.dumps(req_body_json)
+            content=json.dumps(req_body_json).encode('utf-8')
         )
 
     resp_status_code = resp.status_code
@@ -390,8 +396,8 @@ async def chat_completion(request: Request):
         req_body_json["model"] = MODEL
         logger.debug(f"Overriding model from '{original_model}' to '{MODEL}'")
 
-    # Prepare headers for backend request
-    headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
+    # Prepare headers for backend request (exclude content-length as httpx will set it)
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")}
     headers["host"] = OPENAI_API_URL.replace("http://", "").replace("https://", "").split("/")[0]
 
     # Override Authorization header if OPENAI_API_KEY env var is set
@@ -426,8 +432,14 @@ async def models(request: Request):
             params=dict(request.query_params)
         )
 
+    # Filter out headers that should not be forwarded
+    response_headers = {
+        k: v for k, v in resp.headers.items()
+        if k.lower() not in ("content-length", "content-encoding", "transfer-encoding")
+    }
+
     return Response(
         content=resp.content,
         status_code=resp.status_code,
-        headers=resp.headers
+        headers=response_headers
     )
