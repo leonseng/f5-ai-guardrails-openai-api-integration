@@ -13,20 +13,21 @@ from guardrails import GuardrailsClient
 
 load_dotenv(override=False)
 
+YES_VALUES = ("true", 1, "yes", "1")
 CONFIG = {
-    "DEBUG": os.getenv("DEBUG", "false").lower() in ("true", 1, "yes", "1"),
+    "DEBUG": os.getenv("DEBUG", "false").lower() in YES_VALUES,
     "OPENAI_API_URL": os.getenv("OPENAI_API_URL", "http://127.0.0.1:11434"),
     "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY"),
     "MODEL": os.getenv("MODEL"),
     "TIMEOUT": float(os.getenv("PROXY_TIMEOUT", "30")),
     "SYSTEM_PROMPT": os.getenv("SYSTEM_PROMPT"),
-    "F5_AI_GUARDRAILS_API_URL": str(os.getenv("F5_AI_GUARDRAILS_API_URL")),
-    "F5_AI_GUARDRAILS_API_TOKEN": str(os.getenv("F5_AI_GUARDRAILS_API_TOKEN")),
-    "F5_AI_GUARDRAILS_PROJECT_ID": str(os.getenv("F5_AI_GUARDRAILS_PROJECT_ID")),
-    "F5_AI_GUARDRAILS_SCAN_PROMPT": bool(os.getenv("F5_AI_GUARDRAILS_SCAN_PROMPT")),
-    "F5_AI_GUARDRAILS_SCAN_RESPONSE": bool(os.getenv("F5_AI_GUARDRAILS_SCAN_RESPONSE")),
-    "F5_AI_GUARDRAILS_REDACT_PROMPT": bool(os.getenv("F5_AI_GUARDRAILS_REDACT_PROMPT")),
-    "F5_AI_GUARDRAILS_REDACT_RESPONSE": bool(os.getenv("F5_AI_GUARDRAILS_REDACT_RESPONSE")),
+    "F5_AI_GUARDRAILS_API_URL": os.getenv("F5_AI_GUARDRAILS_API_URL"),
+    "F5_AI_GUARDRAILS_API_TOKEN": os.getenv("F5_AI_GUARDRAILS_API_TOKEN"),
+    "F5_AI_GUARDRAILS_PROJECT_ID": os.getenv("F5_AI_GUARDRAILS_PROJECT_ID"),
+    "F5_AI_GUARDRAILS_SCAN_PROMPT": os.getenv("F5_AI_GUARDRAILS_SCAN_PROMPT") in YES_VALUES,
+    "F5_AI_GUARDRAILS_SCAN_RESPONSE": os.getenv("F5_AI_GUARDRAILS_SCAN_RESPONSE") in YES_VALUES,
+    "F5_AI_GUARDRAILS_REDACT_PROMPT": os.getenv("F5_AI_GUARDRAILS_REDACT_PROMPT") in YES_VALUES,
+    "F5_AI_GUARDRAILS_REDACT_RESPONSE": os.getenv("F5_AI_GUARDRAILS_REDACT_RESPONSE") in YES_VALUES,
 }
 
 app = FastAPI(title="OpenAI Proxy")
