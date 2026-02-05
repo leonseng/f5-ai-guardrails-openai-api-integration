@@ -12,37 +12,51 @@ from dotenv import load_dotenv
 from guardrails import GuardrailsClient
 
 load_dotenv(override=False)
-OPENAI_API_URL = os.getenv("OPENAI_API_URL", "http://127.0.0.1:11434")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-MODEL = os.getenv("MODEL")
 
-TIMEOUT = float(os.getenv("PROXY_TIMEOUT", "30"))
-SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT")
-F5_AI_GUARDRAILS_API_URL = str(os.getenv("F5_AI_GUARDRAILS_API_URL"))
-F5_AI_GUARDRAILS_API_TOKEN = str(os.getenv("F5_AI_GUARDRAILS_API_TOKEN"))
-F5_AI_GUARDRAILS_PROJECT_ID = str(os.getenv("F5_AI_GUARDRAILS_PROJECT_ID"))
-F5_AI_GUARDRAILS_SCAN_PROMPT = bool(os.getenv("F5_AI_GUARDRAILS_SCAN_PROMPT"))
-F5_AI_GUARDRAILS_SCAN_RESPONSE = bool(os.getenv("F5_AI_GUARDRAILS_SCAN_RESPONSE"))
-F5_AI_GUARDRAILS_REDACT_PROMPT = bool(os.getenv("F5_AI_GUARDRAILS_REDACT_PROMPT"))
-F5_AI_GUARDRAILS_REDACT_RESPONSE = bool(os.getenv("F5_AI_GUARDRAILS_REDACT_RESPONSE"))
+CONFIG = {
+    "DEBUG": os.getenv("DEBUG", "false").lower() in ("true", 1, "yes", "1"),
+    "OPENAI_API_URL": os.getenv("OPENAI_API_URL", "http://127.0.0.1:11434"),
+    "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY"),
+    "MODEL": os.getenv("MODEL"),
+    "TIMEOUT": float(os.getenv("PROXY_TIMEOUT", "30")),
+    "SYSTEM_PROMPT": os.getenv("SYSTEM_PROMPT"),
+    "F5_AI_GUARDRAILS_API_URL": str(os.getenv("F5_AI_GUARDRAILS_API_URL")),
+    "F5_AI_GUARDRAILS_API_TOKEN": str(os.getenv("F5_AI_GUARDRAILS_API_TOKEN")),
+    "F5_AI_GUARDRAILS_PROJECT_ID": str(os.getenv("F5_AI_GUARDRAILS_PROJECT_ID")),
+    "F5_AI_GUARDRAILS_SCAN_PROMPT": bool(os.getenv("F5_AI_GUARDRAILS_SCAN_PROMPT")),
+    "F5_AI_GUARDRAILS_SCAN_RESPONSE": bool(os.getenv("F5_AI_GUARDRAILS_SCAN_RESPONSE")),
+    "F5_AI_GUARDRAILS_REDACT_PROMPT": bool(os.getenv("F5_AI_GUARDRAILS_REDACT_PROMPT")),
+    "F5_AI_GUARDRAILS_REDACT_RESPONSE": bool(os.getenv("F5_AI_GUARDRAILS_REDACT_RESPONSE")),
+}
 
 app = FastAPI(title="OpenAI Proxy")
 logger = logging.getLogger('uvicorn.error')
 
+# Set log level based on DEBUG config
+logger.setLevel(logging.DEBUG if CONFIG["DEBUG"] else logging.INFO)
+
+# Log all configuration entries at initialization
+for key, value in CONFIG.items():
+    # Mask sensitive values
+    if "TOKEN" in key or "KEY" in key:
+        display_value = "***" if value else None
+    else:
+        display_value = value
+    logger.debug(f"{key}: {display_value}")
+
 # Initialize guardrails client if credentials are configured
 guardrails_client = None
-if F5_AI_GUARDRAILS_API_URL and F5_AI_GUARDRAILS_API_TOKEN and F5_AI_GUARDRAILS_PROJECT_ID:
+if CONFIG["F5_AI_GUARDRAILS_API_URL"] and CONFIG["F5_AI_GUARDRAILS_API_TOKEN"] and CONFIG["F5_AI_GUARDRAILS_PROJECT_ID"]:
     guardrails_client = GuardrailsClient(
-        api_url=F5_AI_GUARDRAILS_API_URL,
-        api_token=F5_AI_GUARDRAILS_API_TOKEN,
-        project_id=F5_AI_GUARDRAILS_PROJECT_ID
+        api_url=CONFIG["F5_AI_GUARDRAILS_API_URL"],
+        api_token=CONFIG["F5_AI_GUARDRAILS_API_TOKEN"],
+        project_id=CONFIG["F5_AI_GUARDRAILS_PROJECT_ID"]
     )
     logger.info("F5 AI Guardrails client initialized")
 else:
     logger.info("F5 AI Guardrails not configured")
 
-logger.info(f"Proxy to backend: {OPENAI_API_URL}")
-logger.debug(f"SYSTEM_PROMPT: {SYSTEM_PROMPT}")
+logger.info(f"Proxy to backend: {CONFIG['OPENAI_API_URL']}")
 
 
 async def stream_processed_response_to_client(
@@ -136,11 +150,11 @@ async def inject_system_prompt(req_body_json: dict) -> dict:
     """
     Inject system prompt if configured and not already present.
     """
-    if SYSTEM_PROMPT and "messages" in req_body_json:
+    if CONFIG["SYSTEM_PROMPT"] and "messages" in req_body_json:
         messages = req_body_json["messages"]
         has_system = any(msg.get("role") == "system" for msg in messages)
         if not has_system:
-            req_body_json["messages"] = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
+            req_body_json["messages"] = [{"role": "system", "content": CONFIG["SYSTEM_PROMPT"]}] + messages
             logger.debug("Injected system prompt")
     return req_body_json
 
@@ -151,7 +165,7 @@ async def scan_prompt_with_guardrail(req_body_json: dict, streaming: bool, enabl
     Returns (error_response, modified_request) tuple.
     """
     # Check header override or fall back to environment variable
-    scan_enabled = enable_guardrail if enable_guardrail is not None else F5_AI_GUARDRAILS_SCAN_PROMPT
+    scan_enabled = enable_guardrail if enable_guardrail is not None else CONFIG["F5_AI_GUARDRAILS_SCAN_PROMPT"]
     if not scan_enabled or not guardrails_client:
         return None, req_body_json
 
@@ -166,7 +180,7 @@ async def scan_prompt_with_guardrail(req_body_json: dict, streaming: bool, enabl
             return create_error_response("Prompt blocked by Guardrail", streaming), {}
 
         # Check header override or fall back to environment variable for redaction
-        redact_enabled = enable_redact if enable_redact is not None else F5_AI_GUARDRAILS_REDACT_PROMPT
+        redact_enabled = enable_redact if enable_redact is not None else CONFIG["F5_AI_GUARDRAILS_REDACT_PROMPT"]
         if scan_results.outcome == "redacted" and redact_enabled:
             req_body_json["messages"][-1]["content"] = scan_results.output
 
@@ -184,7 +198,7 @@ async def scan_response_with_guardrail(response_text: str, streaming: bool, enab
     Returns (error_response, modified_text) tuple.
     """
     # Check header override or fall back to environment variable
-    scan_enabled = enable_guardrail if enable_guardrail is not None else F5_AI_GUARDRAILS_SCAN_RESPONSE
+    scan_enabled = enable_guardrail if enable_guardrail is not None else CONFIG["F5_AI_GUARDRAILS_SCAN_RESPONSE"]
     if not scan_enabled or not guardrails_client:
         return None, response_text
 
@@ -195,7 +209,7 @@ async def scan_response_with_guardrail(response_text: str, streaming: bool, enab
             return create_error_response("Response blocked by Guardrail", streaming), ""
 
         # Check header override or fall back to environment variable for redaction
-        redact_enabled = enable_redact if enable_redact is not None else F5_AI_GUARDRAILS_REDACT_RESPONSE
+        redact_enabled = enable_redact if enable_redact is not None else CONFIG["F5_AI_GUARDRAILS_REDACT_RESPONSE"]
         if scan_results.outcome == "redacted" and redact_enabled:
             return None, scan_results.output
 
@@ -216,7 +230,7 @@ async def handle_streaming_request(req_body_json: dict, headers: dict, query_par
     async with httpx.AsyncClient(timeout=120.0) as client:
         async with client.stream(
             "POST",
-            f"{OPENAI_API_URL.rstrip('/')}/chat/completions",
+            f"{CONFIG['OPENAI_API_URL'].rstrip('/')}/chat/completions",
             headers=headers,
             params=query_params,
             content=json.dumps(req_body_json).encode('utf-8'),
@@ -312,9 +326,9 @@ async def handle_non_streaming_request(req_body_json: dict, headers: dict, query
     logger.debug(f"Request headers: {headers}")
     logger.debug(f"Request body: {req_body_json}")
 
-    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+    async with httpx.AsyncClient(timeout=CONFIG["TIMEOUT"]) as client:
         resp = await client.post(
-            f"{OPENAI_API_URL.rstrip('/')}/chat/completions",
+            f"{CONFIG['OPENAI_API_URL'].rstrip('/')}/chat/completions",
             headers=headers,
             params=query_params,
             content=json.dumps(req_body_json).encode('utf-8')
@@ -328,7 +342,8 @@ async def handle_non_streaming_request(req_body_json: dict, headers: dict, query
     logger.debug(f"Response body: {resp_body_text}")
 
     # Scan response if enabled and successful
-    scan_enabled = (enable_guardrail if enable_guardrail is not None else F5_AI_GUARDRAILS_SCAN_RESPONSE) and guardrails_client
+    scan_enabled = (
+        enable_guardrail if enable_guardrail is not None else CONFIG["F5_AI_GUARDRAILS_SCAN_RESPONSE"]) and guardrails_client
     if scan_enabled and resp_status_code == 200:
         try:
             resp_body_json = json.loads(resp_body_text)
@@ -414,17 +429,17 @@ async def chat_completion(
     original_model = req_body_json.get("model")
 
     # Override model if MODEL env var is set
-    if MODEL:
-        req_body_json["model"] = MODEL
-        logger.debug(f"Overriding model from '{original_model}' to '{MODEL}'")
+    if CONFIG["MODEL"]:
+        req_body_json["model"] = CONFIG["MODEL"]
+        logger.debug(f"Overriding model from '{original_model}' to '{CONFIG['MODEL']}'")
 
     # Prepare headers for backend request (exclude content-length as httpx will set it)
     headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")}
-    headers["host"] = OPENAI_API_URL.replace("http://", "").replace("https://", "").split("/")[0]
+    headers["host"] = CONFIG["OPENAI_API_URL"].replace("http://", "").replace("https://", "").split("/")[0]
 
     # Override Authorization header if OPENAI_API_KEY env var is set
-    if OPENAI_API_KEY:
-        headers["Authorization"] = f"Bearer {OPENAI_API_KEY}"
+    if CONFIG["OPENAI_API_KEY"]:
+        headers["Authorization"] = f"Bearer {CONFIG['OPENAI_API_KEY']}"
         logger.debug("Overriding Authorization header with OPENAI_API_KEY")
 
     # Route to appropriate handler
@@ -440,16 +455,16 @@ async def chat_completion(
 async def models(request: Request):
     """List models"""
     headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
-    headers["host"] = OPENAI_API_URL.replace("http://", "").replace("https://", "").split("/")[0]
+    headers["host"] = CONFIG["OPENAI_API_URL"].replace("http://", "").replace("https://", "").split("/")[0]
 
     # Override Authorization header if OPENAI_API_KEY env var is set
-    if OPENAI_API_KEY:
-        headers["Authorization"] = f"Bearer {OPENAI_API_KEY}"
+    if CONFIG["OPENAI_API_KEY"]:
+        headers["Authorization"] = f"Bearer {CONFIG['OPENAI_API_KEY']}"
         logger.debug("Overriding Authorization header with OPENAI_API_KEY")
 
-    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+    async with httpx.AsyncClient(timeout=CONFIG["TIMEOUT"]) as client:
         resp = await client.get(
-            f"{OPENAI_API_URL.rstrip('/')}/models",
+            f"{CONFIG['OPENAI_API_URL'].rstrip('/')}/models",
             headers=headers,
             params=dict(request.query_params)
         )

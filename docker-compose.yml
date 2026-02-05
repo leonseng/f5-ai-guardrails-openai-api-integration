@@ -9,8 +9,8 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-    volumes:
-      - ./.env:/app/.env
+    env_file:
+      - ./.env
 
   openwebui:
     image: ghcr.io/open-webui/open-webui:latest
