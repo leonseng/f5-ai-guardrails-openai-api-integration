@@ -8,6 +8,7 @@ Notes:
 - the app is written in FastAPI, exposing OpenAI API's `/models` and `/chat/completion` endpoints to support connections from frontends such as Open WebUI
 - supports both streaming and non-streaming responses
 - supports scanning/redaction of both prompts and responses, configured via `F5_AI_GUARDRAILS_SCAN_*` and `F5_AI_GUARDRAILS_REDACT_*` variables in `.env` file
+- supports per-request control via `x-enable-guardrail` and `x-redact` HTTP headers, allowing clients to override global configuration
 
 ## Configuration
 
@@ -27,6 +28,22 @@ The application is configured using environment variables. Create a `.env` file 
 | `F5_AI_GUARDRAILS_SCAN_RESPONSE` | Enable scanning of LLM responses before returning to client | `false` | No |
 | `F5_AI_GUARDRAILS_REDACT_PROMPT` | Apply redactions to flagged content in prompts instead of blocking | `false` | No |
 | `F5_AI_GUARDRAILS_REDACT_RESPONSE` | Apply redactions to flagged content in responses instead of blocking | `false` | No |
+
+## Per-Request Header Control
+
+Clients can override the global guardrails configuration on a per-request basis using custom HTTP headers. This allows fine-grained control over when guardrails are applied without changing the server configuration.
+
+### Available Headers
+
+| Header | Values | Description |
+|--------|--------|-------------|
+| `x-enable-guardrail` | `true` or `false` | Enable or disable guardrail scanning for this request |
+| `x-redact` | `true` or `false` | Enable or disable content redaction for this request |
+
+### Header Precedence
+
+- **When header is NOT provided**: Uses the environment variable configuration (`F5_AI_GUARDRAILS_SCAN_*` and `F5_AI_GUARDRAILS_REDACT_*`)
+- **When header IS provided**: Overrides the environment variable configuration for that specific request
 
 ## Quickstart
 

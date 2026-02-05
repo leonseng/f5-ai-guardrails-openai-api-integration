@@ -2,9 +2,9 @@ import json
 import logging
 import os
 import time
-from typing import AsyncGenerator, Dict, Any
+from typing import AsyncGenerator, Dict, Any, Optional
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, Header
 from fastapi.responses import StreamingResponse
 import httpx
 from dotenv import load_dotenv
@@ -29,12 +29,17 @@ F5_AI_GUARDRAILS_REDACT_RESPONSE = bool(os.getenv("F5_AI_GUARDRAILS_REDACT_RESPO
 app = FastAPI(title="OpenAI Proxy")
 logger = logging.getLogger('uvicorn.error')
 
-if F5_AI_GUARDRAILS_SCAN_PROMPT or F5_AI_GUARDRAILS_SCAN_RESPONSE:
+# Initialize guardrails client if credentials are configured
+guardrails_client = None
+if F5_AI_GUARDRAILS_API_URL and F5_AI_GUARDRAILS_API_TOKEN and F5_AI_GUARDRAILS_PROJECT_ID:
     guardrails_client = GuardrailsClient(
         api_url=F5_AI_GUARDRAILS_API_URL,
         api_token=F5_AI_GUARDRAILS_API_TOKEN,
         project_id=F5_AI_GUARDRAILS_PROJECT_ID
     )
+    logger.info("F5 AI Guardrails client initialized")
+else:
+    logger.info("F5 AI Guardrails not configured")
 
 logger.info(f"Proxy to backend: {OPENAI_API_URL}")
 logger.debug(f"SYSTEM_PROMPT: {SYSTEM_PROMPT}")
@@ -140,12 +145,14 @@ async def inject_system_prompt(req_body_json: dict) -> dict:
     return req_body_json
 
 
-async def scan_prompt_with_guardrail(req_body_json: dict, streaming: bool) -> tuple[StreamingResponse | Response | None, dict]:
+async def scan_prompt_with_guardrail(req_body_json: dict, streaming: bool, enable_guardrail: Optional[bool] = None, enable_redact: Optional[bool] = None) -> tuple[StreamingResponse | Response | None, dict]:
     """
     Scan prompt and return error response if flagged, or modified request if redacted.
     Returns (error_response, modified_request) tuple.
     """
-    if not F5_AI_GUARDRAILS_SCAN_PROMPT:
+    # Check header override or fall back to environment variable
+    scan_enabled = enable_guardrail if enable_guardrail is not None else F5_AI_GUARDRAILS_SCAN_PROMPT
+    if not scan_enabled or not guardrails_client:
         return None, req_body_json
 
     try:
@@ -158,7 +165,9 @@ async def scan_prompt_with_guardrail(req_body_json: dict, streaming: bool) -> tu
         if scan_results.outcome == "flagged":
             return create_error_response("Prompt blocked by Guardrail", streaming), {}
 
-        if scan_results.outcome == "redacted" and F5_AI_GUARDRAILS_REDACT_PROMPT:
+        # Check header override or fall back to environment variable for redaction
+        redact_enabled = enable_redact if enable_redact is not None else F5_AI_GUARDRAILS_REDACT_PROMPT
+        if scan_results.outcome == "redacted" and redact_enabled:
             req_body_json["messages"][-1]["content"] = scan_results.output
 
     except httpx.ConnectError as e:
@@ -169,12 +178,14 @@ async def scan_prompt_with_guardrail(req_body_json: dict, streaming: bool) -> tu
     return None, req_body_json
 
 
-async def scan_response_with_guardrail(response_text: str, streaming: bool) -> tuple[StreamingResponse | Response | None, str]:
+async def scan_response_with_guardrail(response_text: str, streaming: bool, enable_guardrail: Optional[bool] = None, enable_redact: Optional[bool] = None) -> tuple[StreamingResponse | Response | None, str]:
     """
     Scan response and return error or modified text.
     Returns (error_response, modified_text) tuple.
     """
-    if not F5_AI_GUARDRAILS_SCAN_RESPONSE:
+    # Check header override or fall back to environment variable
+    scan_enabled = enable_guardrail if enable_guardrail is not None else F5_AI_GUARDRAILS_SCAN_RESPONSE
+    if not scan_enabled or not guardrails_client:
         return None, response_text
 
     try:
@@ -183,7 +194,9 @@ async def scan_response_with_guardrail(response_text: str, streaming: bool) -> t
         if scan_results.outcome == "flagged":
             return create_error_response("Response blocked by Guardrail", streaming), ""
 
-        if scan_results.outcome == "redacted" and F5_AI_GUARDRAILS_REDACT_RESPONSE:
+        # Check header override or fall back to environment variable for redaction
+        redact_enabled = enable_redact if enable_redact is not None else F5_AI_GUARDRAILS_REDACT_RESPONSE
+        if scan_results.outcome == "redacted" and redact_enabled:
             return None, scan_results.output
 
     except httpx.ConnectError as e:
@@ -194,7 +207,7 @@ async def scan_response_with_guardrail(response_text: str, streaming: bool) -> t
     return None, response_text
 
 
-async def handle_streaming_request(req_body_json: dict, headers: dict, query_params: dict, original_model: str | None = None):
+async def handle_streaming_request(req_body_json: dict, headers: dict, query_params: dict, original_model: str | None = None, enable_guardrail: Optional[bool] = None, enable_redact: Optional[bool] = None):
     """Handle streaming chat completion request"""
 
     logger.debug(f"Request headers: {headers}")
@@ -268,7 +281,7 @@ async def handle_streaming_request(req_body_json: dict, headers: dict, query_par
             logger.debug(f"Response message: {resp_msg}")
 
     # Scan response if enabled
-    error_response, modified_msg = await scan_response_with_guardrail(resp_msg, streaming=True)
+    error_response, modified_msg = await scan_response_with_guardrail(resp_msg, streaming=True, enable_guardrail=enable_guardrail, enable_redact=enable_redact)
     if error_response:
         return error_response
 
@@ -293,7 +306,7 @@ async def handle_streaming_request(req_body_json: dict, headers: dict, query_par
     )
 
 
-async def handle_non_streaming_request(req_body_json: dict, headers: dict, query_params: dict, original_model: str | None = None):
+async def handle_non_streaming_request(req_body_json: dict, headers: dict, query_params: dict, original_model: str | None = None, enable_guardrail: Optional[bool] = None, enable_redact: Optional[bool] = None):
     """Handle non-streaming chat completion request"""
 
     logger.debug(f"Request headers: {headers}")
@@ -315,12 +328,13 @@ async def handle_non_streaming_request(req_body_json: dict, headers: dict, query
     logger.debug(f"Response body: {resp_body_text}")
 
     # Scan response if enabled and successful
-    if F5_AI_GUARDRAILS_SCAN_RESPONSE and resp_status_code == 200:
+    scan_enabled = (enable_guardrail if enable_guardrail is not None else F5_AI_GUARDRAILS_SCAN_RESPONSE) and guardrails_client
+    if scan_enabled and resp_status_code == 200:
         try:
             resp_body_json = json.loads(resp_body_text)
             resp_msg = resp_body_json["choices"][0]["message"]["content"]
 
-            error_response, modified_msg = await scan_response_with_guardrail(resp_msg, streaming=False)
+            error_response, modified_msg = await scan_response_with_guardrail(resp_msg, streaming=False, enable_guardrail=enable_guardrail, enable_redact=enable_redact)
             if error_response:
                 return error_response
 
@@ -368,8 +382,16 @@ async def handle_non_streaming_request(req_body_json: dict, headers: dict, query
 
 
 @app.api_route("/v1/chat/completions", methods=["POST"])
-async def chat_completion(request: Request):
+async def chat_completion(
+    request: Request,
+    x_enable_guardrail: Optional[str] = Header(alias="x-enable-guardrail", default=None),
+    x_redact: Optional[str] = Header(alias="x-redact", default=None)
+):
     """Proxy prompts to backend with optional guardrail scanning"""
+
+    # Parse header flags - if not provided, use None to let backend settings take precedence
+    enable_guardrail = str(x_enable_guardrail).lower() == "true" if x_enable_guardrail is not None else None
+    enable_redact = str(x_redact).lower() == "true" if x_redact is not None else None
 
     # Parse request body
     req_body_text = await request.body()
@@ -384,7 +406,7 @@ async def chat_completion(request: Request):
     req_body_json = await inject_system_prompt(req_body_json)
 
     # Scan prompt if enabled
-    error_response, req_body_json = await scan_prompt_with_guardrail(req_body_json, resp_streaming)
+    error_response, req_body_json = await scan_prompt_with_guardrail(req_body_json, resp_streaming, enable_guardrail, enable_redact)
     if error_response:
         return error_response
 
@@ -408,10 +430,10 @@ async def chat_completion(request: Request):
     # Route to appropriate handler
     if resp_streaming:
         logger.debug("Handling streaming chat completion request")
-        return await handle_streaming_request(req_body_json, headers, dict(request.query_params), original_model)
+        return await handle_streaming_request(req_body_json, headers, dict(request.query_params), original_model, enable_guardrail, enable_redact)
     else:
         logger.debug("Handling non-streaming chat completion request")
-        return await handle_non_streaming_request(req_body_json, headers, dict(request.query_params), original_model)
+        return await handle_non_streaming_request(req_body_json, headers, dict(request.query_params), original_model, enable_guardrail, enable_redact)
 
 
 @app.api_route("/v1/models", methods=["GET"])
