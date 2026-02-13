@@ -16,7 +16,7 @@ The application is configured using environment variables. Create a `.env` file 
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `OPENAI_API_URL` | Backend OpenAI-compatible API endpoint (e.g., Ollama, OpenAI) | `http://127.0.0.1:11434` | Yes |
+| `OPENAI_API_URL` | Backend OpenAI-compatible API endpoint (e.g., Ollama, OpenAI, Azure AI Foundry). Supports query parameters in the URL (e.g., `https://example.azure.com/models?api-version=2024-05-01-preview`) | `http://127.0.0.1:11434` | Yes |
 | `OPENAI_API_KEY` | API key for authenticating with the backend API. Overrides any Authorization header from the client | None | No |
 | `MODEL` | Default model to use for chat completions. Overrides model specified by client | None | No |
 | `SYSTEM_PROMPT` | System prompt to inject into conversations that don't already have one | None | No |
@@ -28,6 +28,18 @@ The application is configured using environment variables. Create a `.env` file 
 | `F5_AI_GUARDRAILS_SCAN_RESPONSE` | Enable scanning of LLM responses before returning to client | `false` | No |
 | `F5_AI_GUARDRAILS_REDACT_PROMPT` | Apply redactions to flagged content in prompts instead of blocking | `false` | No |
 | `F5_AI_GUARDRAILS_REDACT_RESPONSE` | Apply redactions to flagged content in responses instead of blocking | `false` | No |
+
+### Azure AI Foundry Support
+
+Azure AI Foundry provides OpenAI-compatible APIs but requires query parameters like `api-version`. The proxy supports this by extracting query parameters from the `OPENAI_API_URL`:
+
+```bash
+# Example Azure AI Foundry configuration
+OPENAI_API_URL=https://your-instance.services.ai.azure.com/models?api-version=2024-05-01-preview
+OPENAI_API_KEY=your-azure-api-key
+```
+
+Query parameters from the URL are automatically forwarded to all backend requests. If a client also provides query parameters, URL parameters take precedence.
 
 ## Per-Request Header Control
 

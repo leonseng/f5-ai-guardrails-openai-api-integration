@@ -3,6 +3,7 @@ import logging
 import os
 import time
 from typing import AsyncGenerator, Dict, Any, Optional
+from urllib.parse import urlparse, parse_qs
 
 from fastapi import FastAPI, Request, Response, Header
 from fastapi.responses import StreamingResponse
@@ -14,9 +15,17 @@ from guardrails import GuardrailsClient
 load_dotenv(override=False)
 
 YES_VALUES = ("true", 1, "yes", "1")
+
+# Parse OPENAI_API_URL to extract base URL and query parameters
+openai_api_url_raw = os.getenv("OPENAI_API_URL", "http://127.0.0.1:11434")
+parsed_url = urlparse(openai_api_url_raw)
+openai_api_base_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}"
+openai_api_query_params = parse_qs(parsed_url.query)
+
 CONFIG = {
     "DEBUG": os.getenv("DEBUG", "false").lower() in YES_VALUES,
-    "OPENAI_API_URL": os.getenv("OPENAI_API_URL", "http://127.0.0.1:11434"),
+    "OPENAI_API_URL": openai_api_base_url,
+    "OPENAI_API_QUERY_PARAMS": openai_api_query_params,
     "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY"),
     "MODEL": os.getenv("MODEL"),
     "TIMEOUT": float(os.getenv("PROXY_TIMEOUT", "30")),
@@ -58,6 +67,21 @@ else:
     logger.info("F5 AI Guardrails not configured")
 
 logger.info(f"Proxy to backend: {CONFIG['OPENAI_API_URL']}")
+
+
+def merge_query_params(client_params: dict) -> dict:
+    """
+    Merge client query parameters with URL query parameters.
+    URL parameters take precedence over client parameters.
+    """
+    merged = dict(client_params)
+    
+    # Add URL params, converting lists to single values
+    for key, value in CONFIG["OPENAI_API_QUERY_PARAMS"].items():
+        # parse_qs returns lists, take first value
+        merged[key] = value[0] if isinstance(value, list) and len(value) > 0 else value
+    
+    return merged
 
 
 async def stream_processed_response_to_client(
@@ -228,12 +252,16 @@ async def handle_streaming_request(req_body_json: dict, headers: dict, query_par
     logger.debug(f"Request headers: {headers}")
     logger.debug(f"Request body: {req_body_json}")
 
+    # Merge client query params with URL query params
+    merged_params = merge_query_params(query_params)
+    logger.debug(f"Merged query params: {merged_params}")
+
     async with httpx.AsyncClient(timeout=120.0) as client:
         async with client.stream(
             "POST",
             f"{CONFIG['OPENAI_API_URL'].rstrip('/')}/chat/completions",
             headers=headers,
-            params=query_params,
+            params=merged_params,
             content=json.dumps(req_body_json).encode('utf-8'),
         ) as resp:
             resp_status_code = resp.status_code
@@ -327,11 +355,15 @@ async def handle_non_streaming_request(req_body_json: dict, headers: dict, query
     logger.debug(f"Request headers: {headers}")
     logger.debug(f"Request body: {req_body_json}")
 
+    # Merge client query params with URL query params
+    merged_params = merge_query_params(query_params)
+    logger.debug(f"Merged query params: {merged_params}")
+
     async with httpx.AsyncClient(timeout=CONFIG["TIMEOUT"]) as client:
         resp = await client.post(
             f"{CONFIG['OPENAI_API_URL'].rstrip('/')}/chat/completions",
             headers=headers,
-            params=query_params,
+            params=merged_params,
             content=json.dumps(req_body_json).encode('utf-8')
         )
 
@@ -463,11 +495,15 @@ async def models(request: Request):
         headers["Authorization"] = f"Bearer {CONFIG['OPENAI_API_KEY']}"
         logger.debug("Overriding Authorization header with OPENAI_API_KEY")
 
+    # Merge client query params with URL query params
+    merged_params = merge_query_params(dict(request.query_params))
+    logger.debug(f"Merged query params: {merged_params}")
+
     async with httpx.AsyncClient(timeout=CONFIG["TIMEOUT"]) as client:
         resp = await client.get(
             f"{CONFIG['OPENAI_API_URL'].rstrip('/')}/models",
             headers=headers,
-            params=dict(request.query_params)
+            params=merged_params
         )
 
     # Filter out headers that should not be forwarded
