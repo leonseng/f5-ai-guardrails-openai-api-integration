@@ -117,7 +117,7 @@ The test suite is perfect for CI/CD pipelines as it requires no external service
 ```yaml
 # Example GitHub Actions workflow
 - name: Install dependencies
-  run: pip install -r requirements.txt
+  run: pip install -e .[dev]
 
 - name: Run tests
   run: pytest tests/ --cov=main --cov-report=xml

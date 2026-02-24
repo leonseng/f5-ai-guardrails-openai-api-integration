@@ -1,25 +1,6 @@
-# Development files
-.github/
-.env.example
-docker-compose.yml
-Dockerfile
-__pycache__/
-.venv/
-.env
-.git/
-.gitignore
-.vscode/
-pyrightconfig.json
-tests/
-.pytest_cache/
-pytest.ini
-run_tests.sh
+# Exclude everything by default
+*
 
-# Documentation
-README.md
-*.md
-docs/
-assets/
-
-# Application-specific
-.openwebui/
+# Include only what's needed for Docker build
+!pyproject.toml
+!src/*.py
