@@ -32,6 +32,15 @@ resource "aws_secretsmanager_secret_version" "f5_api_token" {
   secret_string = var.f5_api_token
 }
 
+resource "aws_secretsmanager_secret" "system_prompt" {
+  name = "${local.app_name}/SYSTEM_PROMPT"
+}
+
+resource "aws_secretsmanager_secret_version" "system_prompt" {
+  secret_id     = aws_secretsmanager_secret.system_prompt.id
+  secret_string = var.openai_system_prompt
+}
+
 ###############################################################################
 # IAM - App Runner instance role (to read secrets)
 ###############################################################################
@@ -60,6 +69,7 @@ data "aws_iam_policy_document" "secrets_read" {
     resources = [
       aws_secretsmanager_secret.openai_api_key.arn,
       aws_secretsmanager_secret.f5_api_token.arn,
+      aws_secretsmanager_secret.system_prompt.arn,
     ]
   }
 }
@@ -120,7 +130,6 @@ resource "aws_apprunner_service" "this" {
         runtime_environment_variables = {
           OPENAI_API_URL                   = var.openai_api_url
           MODEL                            = var.openai_model
-          SYSTEM_PROMPT                    = var.openai_system_prompt
           F5_AI_GUARDRAILS_API_URL         = var.f5_api_url
           F5_AI_GUARDRAILS_PROJECT_ID      = var.f5_project_id
           F5_AI_GUARDRAILS_SCAN_PROMPT     = var.f5_scan_prompt
@@ -133,6 +142,7 @@ resource "aws_apprunner_service" "this" {
         runtime_environment_secrets = {
           OPENAI_API_KEY             = aws_secretsmanager_secret.openai_api_key.arn
           F5_AI_GUARDRAILS_API_TOKEN = aws_secretsmanager_secret.f5_api_token.arn
+          SYSTEM_PROMPT              = aws_secretsmanager_secret.system_prompt.arn
         }
       }
     }
