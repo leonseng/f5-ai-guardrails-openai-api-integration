@@ -6,6 +6,7 @@ from typing import AsyncGenerator, Dict, Any, Optional
 from urllib.parse import urlparse, parse_qs
 
 from fastapi import FastAPI, Request, Response, Header
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import httpx
 from dotenv import load_dotenv
@@ -40,6 +41,16 @@ CONFIG = {
 }
 
 app = FastAPI(title="OpenAI Proxy")
+
+# Add CORS middleware to allow browser requests
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 logger = logging.getLogger('uvicorn.error')
 
 # Set log level based on DEBUG config
@@ -307,7 +318,7 @@ async def handle_streaming_request(req_body_json: dict, headers: dict, query_par
                             # Accumulate content
                             if "choices" in data and len(data["choices"]) > 0:
                                 delta = data["choices"][0].get("delta", {})
-                                if "content" in delta:
+                                if "content" in delta and delta["content"] is not None:
                                     complete_text += delta["content"]
 
                                 # Capture finish reason
@@ -371,7 +382,9 @@ async def handle_non_streaming_request(req_body_json: dict, headers: dict, query
     logger.debug(f"Response status: {resp_status_code}")
     resp_headers = resp.headers
     logger.debug(f"Response headers: {resp_headers}")
-    resp_body_text = resp.content
+    
+    # Read response body (httpx auto-decompresses gzip)
+    resp_body_text = resp.text
     logger.debug(f"Response body: {resp_body_text}")
 
     # Scan response if enabled and successful
@@ -390,11 +403,6 @@ async def handle_non_streaming_request(req_body_json: dict, headers: dict, query
                 resp_body_json["choices"][0]["message"]["content"] = modified_msg
                 resp_body_text = json.dumps(resp_body_json)
 
-                # recalculate content-length if present in response
-                if "content-length" in resp_headers:
-                    resp_headers = {k: v for k, v in resp_headers.items() if k.lower() != "content-length"}
-                    resp_headers["content-length"] = str(len(resp_body_text))
-
         except json.JSONDecodeError:
             return Response(content=f"Invalid JSON body: {resp_body_text}", status_code=400)
         except ValueError:
@@ -412,20 +420,21 @@ async def handle_non_streaming_request(req_body_json: dict, headers: dict, query
                 resp_body_json["model"] = original_model
                 resp_body_text = json.dumps(resp_body_json)
 
-                # recalculate content-length if present in response
-                if "content-length" in resp_headers:
-                    resp_headers = {k: v for k, v in resp_headers.items() if k.lower() != "content-length"}
-                    resp_headers["content-length"] = str(len(resp_body_text))
-
         except json.JSONDecodeError:
             logger.warning(f"Could not restore original model - invalid JSON: {resp_body_text}")
         except Exception as e:
             logger.error(f"Error restoring original model: {e}")
 
+    # Filter out headers that shouldn't be forwarded
+    filtered_headers = {
+        k: v for k, v in resp_headers.items()
+        if k.lower() not in ("content-length", "content-encoding", "transfer-encoding")
+    }
+
     return Response(
         content=resp_body_text,
         status_code=resp_status_code,
-        headers=resp_headers
+        headers=filtered_headers
     )
 
 

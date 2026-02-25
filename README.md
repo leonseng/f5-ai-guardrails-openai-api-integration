@@ -5,10 +5,11 @@ This demonstrates how an OpenAI API proxy/LLM orchestration application can be i
 ![Architecture](./assets/architecture.excalidraw.png)
 
 Notes:
-- the app is written in FastAPI, exposing OpenAI API's `/models` and `/chat/completion` endpoints to support connections from frontends such as Open WebUI
+- the app is written in FastAPI, exposing OpenAI API's `/v1/models` and `/v1/chat/completions` endpoints to support connections from frontends such as included web chat interface
 - supports both streaming and non-streaming responses
 - supports scanning/redaction of both prompts and responses, configured via `F5_AI_GUARDRAILS_SCAN_*` and `F5_AI_GUARDRAILS_REDACT_*` variables in `.env` file
 - supports per-request control via `x-enable-guardrail` and `x-redact` HTTP headers, allowing clients to override global configuration
+- includes a lightweight web-based chat frontend for testing and demos
 
 ## Configuration
 
@@ -59,18 +60,20 @@ Clients can override the global guardrails configuration on a per-request basis 
 
 ## Quickstart
 
-```
+```bash
 # Create `.env` from `.env.example` and update the values in `.env`
-cp .env .env.example
+cp .env.example .env
 
-# Build proxy image
+# Build all images
 docker compose build
 
-# Run the setup
+# Run the complete stack
 docker compose up
 ```
 
-Browse to [http://localhost:8080](http://localhost:8080) to access Open WebUI.
+You can now access:
+- **AI Chat Frontend**: [http://localhost:3000](http://localhost:3000) - Simple chat interface with OpenAI API
+- **Proxy API**: [http://localhost:8000](http://localhost:8000) - OpenAI-compatible API endpoint
 
 Send a prompt and observe scan logs, e.g.
 ```
@@ -78,6 +81,37 @@ DEBUG:    Guardrail scan results: redacted.
 ```
 
 Confirm scan results on F5 AI Guardrails console.
+
+### Running Individual Services
+
+```bash
+# Run only the proxy and frontend
+docker compose up proxy frontend
+
+# Run only the proxy (for API access)
+docker compose up proxy
+```
+
+## Frontend
+
+The repository includes a simple web-based chat frontend that demonstrates integration with the OpenAI API proxy.
+
+### Features
+
+- **Streaming & Non-Streaming**: Toggle between streaming and non-streaming responses
+- **Guardrails Control**: Enable/disable F5 AI Guardrails per request
+- **Redaction Toggle**: Choose between blocking or redacting flagged content
+- **Clean UI**: Simple, responsive interface for testing and demos
+
+### Accessing the Frontend
+
+When running with Docker Compose:
+```bash
+docker compose up frontend
+```
+Browse to [http://localhost:3000](http://localhost:3000)
+
+For local development, you can also open `frontend/index.html` directly in a browser and configure it to point to your proxy URL (default: `http://localhost:8000`).
 
 ## Development
 

@@ -1,33 +1,19 @@
 services:
   proxy:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.proxy
+    image: leonseng/openai-proxy-with-f5-guardrails:0.7
     ports:
       - "${PROXY_PORT}:8000"
     command: ["uvicorn", "main:app", "--log-level", "debug", "--host", "0.0.0.0", "--port", "8000"]
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/v1/models || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
     env_file:
       - ./.env
 
-  openwebui:
-    image: ghcr.io/open-webui/open-webui:latest
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: leonseng/openai-proxy-with-f5-guardrails-frontend:0.1
     ports:
-      - "8080:8080"
-    environment:
-      - ENABLE_OLLAMA_API="false"
-      - OPENAI_API_BASE_URL=http://proxy:8000/v1
-      - WEBUI_AUTH="false"
-      - WEBUI_URL=http://localhost:8080
-      - GLOBAL_LOG_LEVEL="DEBUG"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    # depends_on:
-    #   - proxy
-    volumes:
-      - ./.openwebui:/app/backend/data
+      - "3000:80"

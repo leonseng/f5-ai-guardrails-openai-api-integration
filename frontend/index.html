@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Chat Assistant</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Arial', 'Helvetica Neue', Helvetica, sans-serif;
+      background: #f5f5f5;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+
+    .chat-container {
+      width: 100%;
+      max-width: 900px;
+      height: 90vh;
+      background: white;
+      border-radius: 4px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border: 1px solid #e0e0e0;
+    }
+
+    .chat-header {
+      background: #2563eb;
+      color: white;
+      padding: 16px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .chat-header h1 {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+
+    .new-chat-btn {
+      background: #ffffff;
+      border: 2px solid #ffffff;
+      color: #2563eb;
+      padding: 8px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 700;
+      transition: all 0.2s;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .new-chat-btn:hover {
+      background: #2563eb;
+      color: white;
+      border-color: white;
+    }
+
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px;
+      background: #ffffff;
+    }
+
+    .message {
+      margin-bottom: 20px;
+      display: flex;
+      animation: fadeIn 0.3s ease-in;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .message.user {
+      justify-content: flex-end;
+    }
+
+    .message-content {
+      max-width: 70%;
+      padding: 14px 18px;
+      border-radius: 4px;
+      word-wrap: break-word;
+      line-height: 1.5;
+    }
+
+    .message.user .message-content {
+      background: #00754a;
+      color: white;
+      border-radius: 4px;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    }
+
+    .message.assistant .message-content {
+      background: #f5f5f5;
+      color: #333;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+    }
+
+    .message-role {
+      font-size: 11px;
+      font-weight: 700;
+      margin-bottom: 6px;
+      opacity: 0.7;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .typing-indicator {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 18px;
+      background: #f5f5f5;
+      border-radius: 4px;
+      border: 1px solid #e0e0e0;
+      max-width: 70px;
+    }
+
+    .typing-indicator.active {
+      display: flex;
+    }
+
+    .typing-indicator span {
+      width: 8px;
+      height: 8px;
+      background: #00754a;
+      border-radius: 50%;
+      animation: bounce 1.4s infinite ease-in-out;
+    }
+
+    .typing-indicator span:nth-child(1) {
+      animation-delay: -0.32s;
+    }
+
+    .typing-indicator span:nth-child(2) {
+      animation-delay: -0.16s;
+    }
+
+    @keyframes bounce {
+
+      0%,
+      80%,
+      100% {
+        transform: scale(0);
+      }
+
+      40% {
+        transform: scale(1);
+      }
+    }
+
+    .chat-input-container {
+      padding: 16px 24px;
+      background: #f5f5f5;
+      border-top: 2px solid #00754a;
+    }
+
+    .chat-input-form {
+      display: flex;
+      gap: 12px;
+    }
+
+    .chat-input {
+      flex: 1;
+      padding: 12px 16px;
+      border: 2px solid #d0d0d0;
+      border-radius: 4px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+      font-family: 'Arial', 'Helvetica Neue', Helvetica, sans-serif;
+    }
+
+    .chat-input:focus {
+      border-color: #2563eb;
+    }
+
+    .send-btn {
+      padding: 12px 28px;
+      background: #2563eb;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 700;
+      transition: background 0.2s;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .send-btn:hover:not(:disabled) {
+      background: #1d4ed8;
+    }
+
+    .send-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .error-message {
+      background: #fff3cd;
+      color: #856404;
+      padding: 12px 16px;
+      border-radius: 4px;
+      margin: 12px 24px;
+      border-left: 4px solid #ffc107;
+      border-left: 4px solid #ffc107;
+    }
+
+    .chat-info {
+      font-size: 11px;
+      color: #666;
+      padding: 12px 24px;
+      background: #f9f9f9;
+      border-bottom: 1px solid #e0e0e0;
+      font-weight: 600;
+    }
+
+    .input-controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .guardrails-options {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .checkbox-container {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+      font-size: 12px;
+      color: #333;
+      user-select: none;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .checkbox-container input[type="checkbox"] {
+      cursor: pointer;
+      width: 17px;
+      height: 17px;
+      accent-color: #2563eb;
+    }
+
+    .checkbox-container:hover {
+      color: #2563eb;
+    }
+
+    .checkbox-container.disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .checkbox-container.disabled input[type="checkbox"] {
+      cursor: not-allowed;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="chat-container">
+    <div class="chat-header">
+      <h1>AI Chat Assistant</h1>
+      <button class="new-chat-btn" onclick="startNewChat()">New Chat</button>
+    </div>
+
+    <div class="chat-info" id="chatInfo">
+      <div style="margin-bottom: 8px;">
+        <span>API URL: <input type="text" id="apiUrlInput" value="http://localhost:8000"
+            style="width: 250px; padding: 4px 8px; border: 1px solid #d0d0d0; border-radius: 3px; font-size: 11px; font-family: monospace;" /></span>
+      </div>
+      <div class="guardrails-options">
+        <label class="checkbox-container">
+          <input type="checkbox" id="enableStreaming" checked autocomplete="off">
+          <span>Enable Streaming</span>
+        </label>
+        <label class="checkbox-container">
+          <input type="checkbox" id="enableGuardrails" onchange="toggleRedactOptions()" autocomplete="off">
+          <span>Enable F5 AI Guardrails</span>
+        </label>
+        <label class="checkbox-container disabled" id="redactLabel">
+          <input type="checkbox" id="redact" disabled autocomplete="off">
+          <span>Redact Content</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="chat-messages" id="chatMessages">
+      <div class="message assistant">
+        <div class="message-content">
+          <div class="message-role">Assistant</div>
+          Hello! How can I help you today?
+        </div>
+      </div>
+    </div>
+
+    <div class="chat-input-container">
+      <form class="chat-input-form" onsubmit="sendMessage(event)" autocomplete="off">
+        <input type="text" class="chat-input" id="messageInput" placeholder="Type your message here..."
+          autocomplete="off">
+        <div class="input-controls">
+          <button type="submit" class="send-btn" id="sendBtn">Send</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    // Configuration
+    const DEFAULT_MODEL = 'gpt-4';
+
+    // Get API URL from input field
+    function getApiUrl() {
+      let url = document.getElementById('apiUrlInput').value.trim();
+
+      // Default to proxy URL if empty
+      if (!url) {
+        url = 'http://localhost:8000';
+        document.getElementById('apiUrlInput').value = url;
+      }
+
+      // Ensure URL has protocol
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        url = 'http://' + url;
+        document.getElementById('apiUrlInput').value = url;
+      }
+
+      return url;
+    }
+
+    // State
+    let conversationHistory = [];
+    let isProcessing = false;
+
+    function startNewChat() {
+      conversationHistory = [];
+
+      const messagesContainer = document.getElementById('chatMessages');
+      messagesContainer.innerHTML = `
+                <div class="message assistant">
+                    <div class="message-content">
+                        <div class="message-role">Assistant</div>
+                        Hello! How can I help you today?
+                    </div>
+                </div>
+            `;
+    }
+
+    function addMessage(role, content) {
+      const messagesContainer = document.getElementById('chatMessages');
+
+      const messageDiv = document.createElement('div');
+      messageDiv.className = `message ${role.toLowerCase()}`;
+
+      messageDiv.innerHTML = `
+                <div class="message-content">
+                    <div class="message-role">${role}</div>
+                    ${content}
+                </div>
+            `;
+
+      messagesContainer.appendChild(messageDiv);
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    function showTypingIndicator() {
+      const messagesContainer = document.getElementById('chatMessages');
+      const typingDiv = document.createElement('div');
+      typingDiv.className = 'message assistant';
+      typingDiv.id = 'typingIndicator';
+      typingDiv.innerHTML = `
+                <div class="typing-indicator active">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+            `;
+      messagesContainer.appendChild(typingDiv);
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    function hideTypingIndicator() {
+      const typingIndicator = document.getElementById('typingIndicator');
+      if (typingIndicator) {
+        typingIndicator.remove();
+      }
+    }
+
+    function showError(message) {
+      const messagesContainer = document.getElementById('chatMessages');
+      const errorDiv = document.createElement('div');
+      errorDiv.className = 'error-message';
+      errorDiv.textContent = `Error: ${message}`;
+      messagesContainer.appendChild(errorDiv);
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    function toggleRedactOptions() {
+      const enableGuardrails = document.getElementById('enableGuardrails').checked;
+      const redactCheckbox = document.getElementById('redact');
+      const redactLabel = document.getElementById('redactLabel');
+
+      if (enableGuardrails) {
+        redactCheckbox.disabled = false;
+        redactLabel.classList.remove('disabled');
+      } else {
+        redactCheckbox.disabled = true;
+        redactCheckbox.checked = false;
+        redactLabel.classList.add('disabled');
+      }
+    }
+
+    async function sendMessage(event) {
+      event.preventDefault();
+
+      if (isProcessing) return;
+
+      const input = document.getElementById('messageInput');
+      const message = input.value.trim();
+
+      if (!message) return;
+
+      // Add user message to UI
+      addMessage('User', message);
+      input.value = '';
+
+      // Add to conversation history (OpenAI format)
+      conversationHistory.push({
+        role: 'user',
+        content: message
+      });
+
+      // Disable input
+      isProcessing = true;
+      document.getElementById('sendBtn').disabled = true;
+      input.disabled = true;
+
+      // Show typing indicator
+      showTypingIndicator();
+
+      try {
+        // Check if streaming is enabled
+        const enableStreaming = document.getElementById('enableStreaming').checked;
+        
+        // Check if F5 AI Guardrails should be enabled
+        const enableGuardrails = document.getElementById('enableGuardrails').checked;
+        const redact = document.getElementById('redact').checked;
+
+        // Get API URL
+        const apiUrl = getApiUrl();
+        console.log('Making request to:', apiUrl);
+
+        const headers = {
+          'Content-Type': 'application/json'
+        };
+
+        // Add guardrails headers if checkbox is checked
+        if (enableGuardrails) {
+          headers['x-enable-guardrail'] = 'true';
+          headers['x-redact'] = redact ? 'true' : 'false';
+        }
+
+        const requestBody = {
+          model: DEFAULT_MODEL,
+          messages: conversationHistory,
+          stream: enableStreaming
+        };
+
+        if (enableStreaming) {
+          await handleStreamingResponse(apiUrl, headers, requestBody);
+        } else {
+          await handleNonStreamingResponse(apiUrl, headers, requestBody);
+        }
+
+      } catch (error) {
+        hideTypingIndicator();
+        console.error('Error:', error);
+        showError(error.message);
+      } finally {
+        isProcessing = false;
+        document.getElementById('sendBtn').disabled = false;
+        input.disabled = false;
+        input.focus();
+      }
+    }
+
+    async function handleNonStreamingResponse(apiUrl, headers, requestBody) {
+      const response = await fetch(`${apiUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify(requestBody)
+      });
+
+      hideTypingIndicator();
+
+      if (!response.ok) {
+        let errorMessage = 'Failed to get response';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error?.message || errorData.detail || errorMessage;
+        } catch (e) {
+          errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        }
+        throw new Error(errorMessage);
+      }
+
+      const data = await response.json();
+
+      // Extract the assistant's response from OpenAI format
+      const assistantResponse = data.choices?.[0]?.message?.content || 'No response received';
+
+      // Add assistant response to UI
+      addMessage('Assistant', assistantResponse);
+
+      // Add to conversation history
+      conversationHistory.push({
+        role: 'assistant',
+        content: assistantResponse
+      });
+    }
+
+    async function handleStreamingResponse(apiUrl, headers, requestBody) {
+      const response = await fetch(`${apiUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify(requestBody)
+      });
+
+      if (!response.ok) {
+        hideTypingIndicator();
+        let errorMessage = 'Failed to get response';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error?.message || errorData.detail || errorMessage;
+        } catch (e) {
+          errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        }
+        throw new Error(errorMessage);
+      }
+
+      hideTypingIndicator();
+
+      // Create assistant message container for streaming
+      const messagesContainer = document.getElementById('chatMessages');
+      const messageDiv = document.createElement('div');
+      messageDiv.className = 'message assistant';
+      messageDiv.innerHTML = `
+        <div class="message-content">
+          <div class="message-role">Assistant</div>
+          <div class="streaming-content"></div>
+        </div>
+      `;
+      messagesContainer.appendChild(messageDiv);
+      const contentDiv = messageDiv.querySelector('.streaming-content');
+
+      let assistantResponse = '';
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+
+          for (const line of lines) {
+            if (!line.trim() || line.trim() === 'data: [DONE]') continue;
+
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.substring(6));
+                const content = data.choices?.[0]?.delta?.content;
+                
+                if (content) {
+                  assistantResponse += content;
+                  contentDiv.textContent = assistantResponse;
+                  messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }
+              } catch (e) {
+                console.error('Error parsing SSE data:', e);
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Streaming error:', error);
+        throw new Error('Streaming interrupted: ' + error.message);
+      }
+
+      // Add to conversation history
+      conversationHistory.push({
+        role: 'assistant',
+        content: assistantResponse
+      });
+
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    // Initialize on page load
+    // Ensure API URL has proper format
+    if (!document.getElementById('apiUrlInput').value.trim()) {
+      document.getElementById('apiUrlInput').value = 'http://localhost:8000';
+    }
+
+    // Focus input on load
+    document.getElementById('messageInput').focus();
+
+    // Ensure checkboxes are set to defaults
+    document.getElementById('enableStreaming').checked = true;
+    document.getElementById('enableGuardrails').checked = false;
+    document.getElementById('redact').checked = false;
+  </script>
+</body>
+
+</html>
