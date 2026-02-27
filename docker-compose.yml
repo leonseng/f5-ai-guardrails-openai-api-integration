@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.proxy
-    image: leonseng/openai-proxy-with-f5-guardrails:0.8
+    image: leonseng/openai-proxy-with-f5-guardrails:0.8.1
     ports:
       - "${PROXY_PORT}:8000"
     env_file:
