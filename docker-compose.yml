@@ -3,10 +3,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.proxy
-    image: leonseng/openai-proxy-with-f5-guardrails:0.7
+    image: leonseng/openai-proxy-with-f5-guardrails:0.8
     ports:
       - "${PROXY_PORT}:8000"
-    command: ["uvicorn", "main:app", "--log-level", "debug", "--host", "0.0.0.0", "--port", "8000"]
     env_file:
       - ./.env
 

@@ -80,18 +80,28 @@ else:
 logger.info(f"Proxy to backend: {CONFIG['OPENAI_API_URL']}")
 
 
+def filter_response_headers(headers: dict) -> dict:
+    """
+    Filter out headers that should not be forwarded to the client.
+    """
+    return {
+        k: v for k, v in headers.items()
+        if k.lower() not in ("content-length", "content-encoding", "transfer-encoding", "server", "date")
+    }
+
+
 def merge_query_params(client_params: dict) -> dict:
     """
     Merge client query parameters with URL query parameters.
     URL parameters take precedence over client parameters.
     """
     merged = dict(client_params)
-    
+
     # Add URL params, converting lists to single values
     for key, value in CONFIG["OPENAI_API_QUERY_PARAMS"].items():
         # parse_qs returns lists, take first value
         merged[key] = value[0] if isinstance(value, list) and len(value) > 0 else value
-    
+
     return merged
 
 
@@ -333,6 +343,7 @@ async def handle_streaming_request(req_body_json: dict, headers: dict, query_par
 
             resp_msg, metadata = await buffer_streaming_response_from_backend(resp)
             logger.debug(f"Response message: {resp_msg}")
+            logger.debug(f"Response headers: {resp.headers}")
 
     # Scan response if enabled
     error_response, modified_msg = await scan_response_with_guardrail(resp_msg, streaming=True, enable_guardrail=enable_guardrail, enable_redact=enable_redact)
@@ -343,10 +354,7 @@ async def handle_streaming_request(req_body_json: dict, headers: dict, query_par
     response_model = original_model or metadata.get("model", req_body_json.get("model", "unknown"))
 
     # Filter out headers that should not be forwarded
-    response_headers = {
-        k: v for k, v in resp.headers.items()
-        if k.lower() not in ("content-length", "content-encoding", "transfer-encoding")
-    }
+    response_headers = filter_response_headers(dict(resp.headers))
 
     return StreamingResponse(
         stream_processed_response_to_client(
@@ -380,9 +388,8 @@ async def handle_non_streaming_request(req_body_json: dict, headers: dict, query
 
     resp_status_code = resp.status_code
     logger.debug(f"Response status: {resp_status_code}")
-    resp_headers = resp.headers
-    logger.debug(f"Response headers: {resp_headers}")
-    
+    logger.debug(f"Response headers: {resp.headers}")
+
     # Read response body (httpx auto-decompresses gzip)
     resp_body_text = resp.text
     logger.debug(f"Response body: {resp_body_text}")
@@ -426,10 +433,7 @@ async def handle_non_streaming_request(req_body_json: dict, headers: dict, query
             logger.error(f"Error restoring original model: {e}")
 
     # Filter out headers that shouldn't be forwarded
-    filtered_headers = {
-        k: v for k, v in resp_headers.items()
-        if k.lower() not in ("content-length", "content-encoding", "transfer-encoding")
-    }
+    filtered_headers = filter_response_headers(dict(resp.headers))
 
     return Response(
         content=resp_body_text,
@@ -516,10 +520,7 @@ async def models(request: Request):
         )
 
     # Filter out headers that should not be forwarded
-    response_headers = {
-        k: v for k, v in resp.headers.items()
-        if k.lower() not in ("content-length", "content-encoding", "transfer-encoding")
-    }
+    response_headers = filter_response_headers(dict(resp.headers))
 
     return Response(
         content=resp.content,
